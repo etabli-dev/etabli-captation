@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Hardened-runtime entitlements for the Developer ID build (packaging/macos/build.sh).
+  CPython with ctypes/libffi closures (pystray via PyObjC, desktop-notifier via rubicon-objc)
+  may need writable+executable memory. Verify on the Mac: if the notarised build starts, shows
+  the tray and `captation doctor` passes without this key, remove it (runbook, stage 11).
+  No device entitlements: the agent never opens the microphone or the camera.
+-->
+<plist version="1.0">
+<dict>
+	<key>com.apple.security.cs.allow-unsigned-executable-memory</key>
+	<true/>
+</dict>
+</plist>

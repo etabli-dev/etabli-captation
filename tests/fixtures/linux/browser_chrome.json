@@ -1,0 +1,31 @@
+{
+ "pw_dump": [
+  {
+   "id": 90,
+   "info": {
+    "props": {
+     "application.name": "Google Chrome input",
+     "application.process.binary": "chrome",
+     "application.process.id": 3021130,
+     "client.id": 98,
+     "media.class": "Stream/Input/Audio",
+     "node.name": "device-9"
+    },
+    "state": "running"
+   },
+   "type": "PipeWire:Interface:Node"
+  },
+  {
+   "id": 98,
+   "info": {
+    "props": {
+     "application.name": "Google Chrome input",
+     "application.process.binary": "chrome",
+     "application.process.id": 3021130,
+     "pipewire.sec.pid": 4627
+    }
+   },
+   "type": "PipeWire:Interface:Client"
+  }
+ ]
+}

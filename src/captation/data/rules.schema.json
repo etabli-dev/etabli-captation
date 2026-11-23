@@ -1,0 +1,81 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:etabli:captation:rules:1",
+  "title": "Établi Captation detection and mode rules",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "apps", "modes", "ignore"],
+  "properties": {
+    "version": { "const": 1 },
+    "apps": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "category", "match"],
+        "properties": {
+          "id": { "type": "string", "pattern": "^[a-z0-9_-]+$" },
+          "category": { "enum": ["meeting", "call", "messenger", "browser"] },
+          "match": {
+            "type": "object",
+            "additionalProperties": false,
+            "minProperties": 1,
+            "properties": {
+              "process": { "$ref": "#/$defs/regexList" },
+              "bundle_id": { "$ref": "#/$defs/regexList" },
+              "package": { "$ref": "#/$defs/regexList" }
+            }
+          },
+          "title_rules": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["pattern", "category"],
+              "properties": {
+                "pattern": { "type": "string", "format": "regex" },
+                "category": { "enum": ["meeting", "call", "messenger"] },
+                "app_id": { "type": "string", "pattern": "^[a-z0-9_-]+$" }
+              }
+            }
+          },
+          "verify": { "type": "boolean", "default": false },
+          "note": { "type": "string" }
+        }
+      }
+    },
+    "modes": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["when", "mode", "reason"],
+        "properties": {
+          "when": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "category": { "enum": ["meeting", "call", "messenger", "browser", "unknown"] },
+              "camera_active": { "type": "boolean" }
+            }
+          },
+          "mode": { "enum": ["audio", "video"] },
+          "reason": { "type": "string", "pattern": "^[a-z0-9_]+$" }
+        }
+      }
+    },
+    "ignore": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "process": { "$ref": "#/$defs/regexList" },
+        "bundle_id": { "$ref": "#/$defs/regexList" }
+      }
+    }
+  },
+  "$defs": {
+    "regexList": { "type": "array", "minItems": 1, "items": { "type": "string", "format": "regex" } }
+  }
+}

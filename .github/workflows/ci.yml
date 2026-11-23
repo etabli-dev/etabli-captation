@@ -1,0 +1,46 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: astral-sh/setup-uv@1db35dd8eee11c5894872e0b383ae6c406cf738d # v10.4.0
+        with:
+          python-version: "3.12"
+      - name: Install ffmpeg
+        shell: bash
+        run: |
+          case "$RUNNER_OS" in
+            Linux) sudo apt-get update && sudo apt-get install -y ffmpeg ;;
+            macOS) brew install ffmpeg ;;
+            Windows) choco install ffmpeg -y --no-progress ;;
+          esac
+      - run: uv sync --locked
+      - name: Specs in sync
+        run: uv run python tools/sync_specs.py --check
+      - name: Platform facts
+        # CI runners cannot verify OS facts: pending macOS/Windows facts (ADR-015) are enforced on
+        # the target machines (stage runs) and by the release gate (check_facts --release).
+        run: uv run python tools/check_facts.py --os linux
+      - run: uv run ruff check src tests tools
+      - run: uv run ruff format --check src tests tools
+      - run: uv run mypy --strict src
+      - name: Unit tests
+        run: uv run pytest -m "not obs and not e2e"
+      - name: Licence gate (runtime dependencies)
+        run: uv run python tools/licence_gate.py
+      - name: Requirement traceability
+        run: uv run python tools/traceability.py

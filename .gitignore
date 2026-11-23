@@ -1,0 +1,104 @@
+# Operating system and editor files
+.DS_Store
+Thumbs.db
+desktop.ini
+*~
+*.swp
+
+# R
+.Rproj.user/
+.Rhistory
+.RData
+.Ruserdata
+renv/library/
+renv/staging/
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+.hypothesis/
+.coverage
+htmlcov/
+*.egg-info/
+build/
+dist/
+
+# Swift probe (SwiftPM)
+.build/
+.swiftpm/
+DerivedData/
+
+# Node, Quarto
+node_modules/
+.quarto/
+
+# Recordings and session data: personal data, never commit.
+# Synthetic test fixtures need an explicit !exception.
+CaptationData/
+*.mkv
+*.mka
+*.mp4
+*.mov
+*.flac
+*.wav
+*.mp3
+*.m4a
+*.opus
+*.ogg
+*.aac
+
+# Secrets and archives
+.env
+.env.*
+*.pem
+*.key
+*.p12
+*.zip
+*.tar
+*.tar.gz
+*.bundle
+*.7z
+
+# --- Agent, prompt, orchestration and audit files stay local (not versioned) ---
+AGENTS.md
+AGENTS.override.md
+CLAUDE.md
+CLAUDE.local.md
+GEMINI.md
+.claude/
+.codex/
+.gemini/
+.cursor/
+.cursorrules
+.aider*
+.windsurf*
+.agent/
+.agents/
+.llm/
+.mcp.json
+.github/copilot-instructions.md
+.github/instructions/
+.github/prompts/
+*[Pp][Rr][Oo][Mm][Pp][Tt]*
+*[Oo][Rr][Cc][Hh][Ee][Ss][Tt][Rr][Aa][Tt]*
+*[Aa][Uu][Dd][Ii][Tt]*
+*[Hh][Aa][Nn][Dd][Oo][Vv][Ee][Rr]*
+*[Cc][Ll][Aa][Uu][Dd][Ee]*
+[Ll][Ll][Mm]
+[Ll][Ll][Mm][_.-]*
+*[_.-][Ll][Ll][Mm]
+*[_.-][Ll][Ll][Mm][_.-]*
+# Local build notes (state, stage reports)
+STATE.md
+reports/
+# --- end agent block ---
+
+# Local caches
+.cache/
+.coverage.*

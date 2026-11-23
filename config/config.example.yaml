@@ -1,0 +1,86 @@
+# Établi Captation: example configuration (schema: specs/config.schema.json)
+# Copy to the platform config dir (see `captation doctor`) as config.yaml and adjust.
+
+schema_version: 1
+project_id: PRJ-2026-001          # or null
+data_root: ~/CaptationData
+language: de
+
+consent:
+  require_armed: true             # cannot be disabled
+  auto_disarm_after_minutes: 240
+  countdown_seconds: 5
+  ask_consent_ref_on_arm: true
+  consent_ref_pattern: '^[A-Z0-9-]{3,32}$'
+  start_reminder_text: "Aufnahme läuft – bitte die Einwilligung aller Teilnehmenden zu Beginn mündlich bestätigen lassen."
+
+detection:
+  poll_interval_ms: 1000
+  start_debounce_s: 3
+  stop_debounce_s: 10
+  rules_file: builtin:default
+  user_rules_file: null
+  record_unknown_apps: false
+  store_window_titles: false
+
+recording:
+  audio:
+    sample_rate: 48000
+    codec_preference: [pcm_s24le, flac, aac]
+    tracks: { mix: 1, remote: 2, local: 3, external: null }
+    local_input: follow_default   # or the exact device name the call apps use
+    external_input_device: null   # e.g. "RØDECaster Duo Main"
+  video:
+    capture: window_preferred
+    fps: 30
+    max_height: 1080
+    encoder_preference: [hardware, x264]
+  segments_on_mode_change: true
+
+obs:
+  executable: null
+  websocket:
+    host: 127.0.0.1
+    port: 4455
+    password_source: keyring
+    password_env: CAPTATION_OBS_PASSWORD
+  profile_audio: Captation-Audio
+  profile_video: Captation-Video
+  scene_collection: Captation
+  launch_args: []                 # verified flags are added by the launcher (stage 03)
+  launch_on: arm
+  exposure_policy: require_firewall
+
+postprocess:
+  extract_tracks: true
+  audio_export_format: flac
+  remux_video_to: mp4
+  keep_original_mkv: true
+  checksums: sha256
+  make_read_only: true
+
+qc:
+  silence_dbfs: -60
+  silence_warn_s: 30
+
+storage:
+  require_disk_encryption: block   # owner decision 2026-11-23 (ADR-016)
+  min_free_gb: 10
+  age_recipients: []
+  retention_days: null
+
+import:
+  require_consent_ref: true
+  allowed_extensions: [wav, flac, mp3, m4a, opus, ogg]
+  max_file_gb: 4
+
+hooks:
+  on_session_complete: null       # e.g. ["/usr/local/bin/transcribe-session", "{session_dir}"]
+  timeout_s: 3600
+
+ui:
+  sound_on_start: true            # indicator, countdown and reminder are always on
+
+logging:
+  level: INFO
+  dir: null

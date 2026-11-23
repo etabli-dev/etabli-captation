@@ -1,0 +1,25 @@
+name: Cancel during the countdown
+description: >-
+  The user cancels the countdown. The session is written with status cancelled and no
+  segment is ever started. The same call is not offered again while it continues; once it
+  has been gone for stop_debounce_s, a new call starts a new pending start.
+reqs: [R-17, R-37]
+apps:
+  signal: {pid: 300, process_name: signal-desktop}
+steps:
+  - {t: 0, event: arm, consent_ref: CR-2026-004, expect: [Armed, "SetTrayState(armed)", PrewarmObs]}
+  - {t: 1, mic: [signal], expect: [], state: PENDING_START}
+  - {t: 4, mic: [signal], expect: ["BeginSession(signal)", "NotifyCountdown(signal,5)"], state: COUNTDOWN}
+  - t: 6
+    event: cancel
+    expect: [CloseCountdown, "WriteSessionJson(cancelled)", "Notify(start_cancelled)"]
+    state: ARMED_IDLE
+  - {t: 7, mic: [signal], expect: [], state: ARMED_IDLE}
+  - {t: 9, mic: [signal], expect: [], state: ARMED_IDLE}
+  - {t: 30, mic: [signal], expect: [], state: ARMED_IDLE}
+  - {t: 31, mic: [], expect: [], state: ARMED_IDLE}
+  - {t: 41, mic: [], expect: [], state: ARMED_IDLE}
+  - {t: 42, mic: [signal], expect: [], state: PENDING_START}
+  - {t: 43, event: disarm, expect: ["Disarmed(user)", "SetTrayState(disarmed)"], state: DISARMED}
+final_state: DISARMED
+sessions: 1

@@ -1,0 +1,47 @@
+name: Signal ends, WhatsApp starts within the stop debounce
+description: >-
+  The Signal call ends and a WhatsApp call starts 3 s later, well within stop_debounce_s.
+  The different app_id finalises the Signal session at once and the WhatsApp call becomes a
+  second session with its own debounce and countdown.
+reqs: [R-09, R-10, R-17]
+apps:
+  signal: {pid: 300, process_name: signal-desktop}
+  whatsapp: {pid: 200, process_name: WhatsApp}
+steps:
+  - {t: 0, event: arm, consent_ref: CR-2026-008, expect: [Armed, "SetTrayState(armed)", PrewarmObs]}
+  - {t: 1, mic: [signal], expect: [], state: PENDING_START}
+  - {t: 4, mic: [signal], expect: ["BeginSession(signal)", "NotifyCountdown(signal,5)"]}
+  - t: 9
+    mic: [signal]
+    expect:
+      - CloseCountdown
+      - "SetTrayState(recording,audio,signal)"
+      - "StartSegment(1,audio,rule:default)"
+      - "WriteSessionJson(recording)"
+      - ShowReminder
+    state: RECORDING
+  - {t: 30, mic: [], expect: [], state: PENDING_STOP}
+  - {t: 33, mic: [whatsapp], context: whatsapp/audio, expect: ["StopSegment(1)", Teardown], state: STOPPING}
+  - {t: 34, event: segment_stopped, expect: [RunPostprocess, "SetTrayState(armed)"], state: POSTPROCESSING}
+  - {t: 35, mic: [whatsapp], expect: [], state: POSTPROCESSING}
+  - {t: 40, event: postprocess_done, expect: ["WriteSessionJson(complete)"], state: PENDING_START}
+  - {t: 41, mic: [whatsapp], expect: [], state: PENDING_START}
+  - t: 43
+    mic: [whatsapp]
+    expect: ["BeginSession(whatsapp)", "NotifyCountdown(whatsapp,5)"]
+    state: COUNTDOWN
+  - t: 48
+    mic: [whatsapp]
+    expect:
+      - CloseCountdown
+      - "SetTrayState(recording,audio,whatsapp)"
+      - "StartSegment(1,audio,rule:default)"
+      - "WriteSessionJson(recording)"
+      - ShowReminder
+    state: RECORDING
+  - {t: 60, mic: [], expect: [], state: PENDING_STOP}
+  - {t: 70, mic: [], expect: ["StopSegment(1)", Teardown], state: STOPPING}
+  - {t: 71, event: segment_stopped, expect: [RunPostprocess, "SetTrayState(armed)"]}
+  - {t: 75, event: postprocess_done, expect: ["WriteSessionJson(complete)"], state: ARMED_IDLE}
+final_state: ARMED_IDLE
+sessions: 2

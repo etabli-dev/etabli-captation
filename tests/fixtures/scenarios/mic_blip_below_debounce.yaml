@@ -1,0 +1,18 @@
+name: Short microphone blip
+description: >-
+  WhatsApp holds the microphone for less than start_debounce_s (3 s), twice. No countdown,
+  no session, nothing recorded.
+reqs: [R-10]
+apps:
+  whatsapp: {pid: 200, process_name: WhatsApp}
+steps:
+  - {t: 0, event: arm, consent_ref: null, expect: [Armed, "SetTrayState(armed)", PrewarmObs]}
+  - {t: 1, mic: [whatsapp], context: whatsapp/audio, expect: [], state: PENDING_START}
+  - {t: 2.5, mic: [whatsapp], expect: [], state: PENDING_START}
+  - {t: 3.5, mic: [], context: null, expect: [], state: ARMED_IDLE}
+  - {t: 5, mic: [], expect: [], state: ARMED_IDLE}
+  - {t: 6, mic: [whatsapp], expect: [], state: PENDING_START}
+  - {t: 8.9, mic: [whatsapp], expect: [], state: PENDING_START}
+  - {t: 9, mic: [], expect: [], state: ARMED_IDLE}
+final_state: ARMED_IDLE
+sessions: 0

@@ -1,0 +1,108 @@
+# Établi Captation: default detection and mode rules (schema: specs/rules.schema.json)
+#
+# - Regexes are Python `re` syntax. Single-quote them in YAML so backslashes stay literal.
+# - `process` matches the process basename, `bundle_id` the macOS bundle ID and `package`
+#   the Windows package family name.
+# - Entries with `verify: true` are best guesses. They MUST be confirmed or corrected on the
+#   real OS (stages 05–07) and logged in docs/platform-facts.md before stage 12 can pass.
+# - Users can extend or override these rules via detection.user_rules_file
+#   (same schema, merged by app id).
+
+version: 1
+
+apps:
+  # ---------- meeting apps → video ----------
+  - id: zoom
+    category: meeting
+    match:
+      process: ['(?i)^zoom(\.us)?(\.exe)?$']
+      bundle_id: ['^us\.zoom\.xos$']
+
+  - id: teams
+    category: meeting
+    match:
+      process: ['(?i)^ms-?teams(\.exe)?$', '(?i)^microsoft teams']
+      bundle_id: ['^com\.microsoft\.teams2?$']
+      package: ['(?i)^MSTeams_']
+    verify: true
+
+  - id: webex
+    category: meeting
+    match:
+      process: ['(?i)webex', '(?i)^ciscocollabhost(\.exe)?$', '(?i)^atmgr(\.exe)?$']
+      bundle_id: ['(?i)^cisco-systems\.spark$']
+    verify: true
+
+  - id: jitsi
+    category: meeting
+    match:
+      process: ['(?i)^jitsi[ -]?meet(\.exe)?$']
+    verify: true
+
+  # ---------- phone calls relayed to the Mac (Continuity) → audio ----------
+  - id: phone_relay
+    category: call
+    match:
+      process: ['(?i)^(facetime|phone|avconferenced|callservicesd)$']
+      bundle_id: ['^com\.apple\.(FaceTime|mobilephone)$']
+    verify: true
+    note: >-
+      Determine empirically which process holds the mic during an iPhone call on the Mac
+      (macOS version-dependent). Keep only the confirmed patterns.
+
+  # ---------- messengers → audio, video if camera on ----------
+  - id: whatsapp
+    category: messenger
+    match:
+      process: ['(?i)^whatsapp(\.root)?(\.exe)?$']
+      bundle_id: ['^net\.whatsapp\.WhatsApp$']
+      package: ['(?i)^5319275A\.WhatsAppDesktop_']
+    verify: true
+
+  - id: signal
+    category: messenger
+    match:
+      process: ['(?i)^signal(-desktop)?(\.exe)?$']
+      bundle_id: ['^org\.whispersystems\.signal-desktop$']
+    verify: true
+
+  - id: telegram
+    category: messenger
+    match:
+      process: ['(?i)^telegram(-desktop)?(\.exe)?$']
+      bundle_id: ['^(ru\.keepcoder\.Telegram|com\.tdesktop\.Telegram)$']
+    verify: true
+
+  # ---------- browsers → classified by window title where available ----------
+  - id: browser
+    category: browser
+    match:
+      process: ['(?i)^(google chrome|chrome|chromium(-browser)?|firefox(-bin)?|safari|msedge|microsoft edge|brave( browser)?)(\.exe)?$']
+      bundle_id: ['^(com\.google\.Chrome|org\.chromium\.Chromium|org\.mozilla\.firefox|com\.apple\.Safari|com\.microsoft\.edgemac|com\.brave\.Browser)(\.helper.*)?$']
+    title_rules:
+      - { pattern: '(?i)(google meet|meet\.google\.com|^meet\s[-–])', category: meeting, app_id: google_meet }
+      - { pattern: '(?i)jitsi', category: meeting, app_id: jitsi_web }
+      - { pattern: '(?i)bigbluebutton', category: meeting, app_id: bbb }
+      - { pattern: '(?i)microsoft teams', category: meeting, app_id: teams_web }
+      - { pattern: '(?i)zoom', category: meeting, app_id: zoom_web }
+      - { pattern: '(?i)webex', category: meeting, app_id: webex_web }
+      - { pattern: '(?i)whatsapp', category: messenger, app_id: whatsapp_web }
+    note: >-
+      Without window titles (e.g. Wayland), a browser holding the mic stays category `browser`:
+      audio, or video if the camera is on.
+
+modes:
+  - { when: { category: meeting }, mode: video, reason: meeting_app }
+  - { when: { camera_active: true }, mode: video, reason: camera_active }
+  - { when: {}, mode: audio, reason: default }
+
+ignore:
+  process:
+    - '(?i)^obs(32|64)?(\.exe)?$'
+    - '(?i)^obs-ffmpeg-mux(\.exe)?$'
+    - '(?i)^obs-browser-page(\.exe)?$'
+    - '(?i)^captation'
+    - '(?i)^captation-probe$'
+  bundle_id:
+    - '^com\.obsproject\.obs-studio'
+    - '^de\.etabli\.captation'

@@ -1,0 +1,327 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:etabli:captation:session:1",
+  "title": "Établi Captation session metadata (session.json)",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "session_id",
+    "status",
+    "origin",
+    "app",
+    "started_at",
+    "host",
+    "segments"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "session_id": {
+      "type": "string",
+      "pattern": "^S-[0-9]{8}-[0-9]{6}-[0-9a-f]{4}$"
+    },
+    "project_id": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "pattern": "^PRJ-[0-9]{4}-[0-9]{3}$"
+    },
+    "consent_ref": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "maxLength": 64
+    },
+    "status": {
+      "enum": [
+        "recording",
+        "complete",
+        "interrupted",
+        "cancelled",
+        "failed"
+      ]
+    },
+    "origin": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "type",
+        "time_source"
+      ],
+      "properties": {
+        "type": {
+          "enum": [
+            "obs",
+            "import"
+          ]
+        },
+        "device": {
+          "enum": [
+            "plaud_note_pro",
+            "viaim_recdot",
+            "recordergear_pr200",
+            "magmo_pro",
+            "generic",
+            null
+          ]
+        },
+        "time_source": {
+          "enum": [
+            "clock",
+            "file_metadata",
+            "user_input",
+            "file_mtime"
+          ]
+        },
+        "source_sha256": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "pattern": "^[0-9a-f]{64}$",
+          "description": "SHA-256 of the imported source file. The original file name is never stored."
+        }
+      }
+    },
+    "app": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "category"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z0-9_-]+$"
+        },
+        "category": {
+          "enum": [
+            "meeting",
+            "call",
+            "messenger",
+            "browser",
+            "unknown"
+          ]
+        },
+        "window_title": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Only if detection.store_window_titles"
+        }
+      }
+    },
+    "started_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "ended_at": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date-time"
+    },
+    "host": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "os",
+        "os_version",
+        "agent_version",
+        "obs_version"
+      ],
+      "properties": {
+        "os": {
+          "enum": [
+            "linux",
+            "macos",
+            "windows"
+          ]
+        },
+        "os_version": {
+          "type": "string"
+        },
+        "agent_version": {
+          "type": "string"
+        },
+        "obs_version": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "obs_websocket_version": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    "config_digest": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "segments": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/segment"
+      }
+    },
+    "warnings": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    }
+  },
+  "$defs": {
+    "segment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "index",
+        "mode",
+        "trigger",
+        "started_at",
+        "files"
+      ],
+      "properties": {
+        "index": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 99
+        },
+        "mode": {
+          "enum": [
+            "audio",
+            "video"
+          ]
+        },
+        "trigger": {
+          "type": "string",
+          "description": "e.g. rule:meeting_app, rule:camera_active, upgrade:camera_on, recovery:obs_restart"
+        },
+        "started_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "ended_at": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time"
+        },
+        "interrupted": {
+          "type": "boolean",
+          "default": false
+        },
+        "capture": {
+          "enum": [
+            "window",
+            "display",
+            "none"
+          ]
+        },
+        "files": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/file"
+          }
+        }
+      }
+    },
+    "file": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "role",
+        "path",
+        "sha256",
+        "bytes"
+      ],
+      "properties": {
+        "role": {
+          "enum": [
+            "container",
+            "audio",
+            "video",
+            "mix",
+            "remote",
+            "local",
+            "external"
+          ]
+        },
+        "path": {
+          "type": "string",
+          "pattern": "^seg[0-9]{2}_(container|audio|video|mix|remote|local|external)\\.(mkv|mka|mp4|flac|wav|mp3|m4a|opus|ogg)(\\.age)?$"
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "bytes": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "duration_s": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "codec": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "qc": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "rms_dbfs": {
+              "type": [
+                "number",
+                "null"
+              ]
+            },
+            "peak_dbfs": {
+              "type": [
+                "number",
+                "null"
+              ]
+            },
+            "silent_ratio": {
+              "type": [
+                "number",
+                "null"
+              ],
+              "minimum": 0,
+              "maximum": 1
+            },
+            "longest_silence_s": {
+              "type": [
+                "number",
+                "null"
+              ],
+              "minimum": 0
+            }
+          }
+        }
+      }
+    }
+  }
+}

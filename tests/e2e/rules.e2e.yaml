@@ -1,0 +1,16 @@
+# Test-only user rules for the end-to-end harness. Never shipped.
+version: 1
+apps:
+  - id: fakecall_e2e
+    category: messenger
+    match:
+      process: ['^fakecall-e2e(\.exe)?$']
+  - id: fakemeet_e2e
+    category: meeting
+    match:
+      process: ['^fakemeet-e2e(\.exe)?$']
+modes:
+  - { when: { category: meeting }, mode: video, reason: meeting_app }
+  - { when: { camera_active: true }, mode: video, reason: camera_active }
+  - { when: {}, mode: audio, reason: default }
+ignore: {}

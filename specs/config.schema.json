@@ -1,0 +1,550 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:etabli:captation:config:1",
+  "title": "Établi Captation agent configuration",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "data_root",
+    "consent",
+    "detection",
+    "recording",
+    "obs",
+    "postprocess",
+    "storage",
+    "qc",
+    "import"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "project_id": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "pattern": "^PRJ-[0-9]{4}-[0-9]{3}$",
+      "description": "Research project ID (PRJ-YYYY-NNN). null → sessions go to 'unassigned'."
+    },
+    "data_root": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Root folder for recordings. '~' is expanded."
+    },
+    "language": {
+      "enum": [
+        "de",
+        "en"
+      ],
+      "default": "de"
+    },
+    "consent": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "require_armed",
+        "auto_disarm_after_minutes",
+        "countdown_seconds"
+      ],
+      "properties": {
+        "require_armed": {
+          "const": true,
+          "description": "Recording only while armed. Cannot be disabled (docs/principles.md §2)."
+        },
+        "auto_disarm_after_minutes": {
+          "type": "integer",
+          "minimum": 5,
+          "maximum": 720
+        },
+        "countdown_seconds": {
+          "type": "integer",
+          "minimum": 3,
+          "maximum": 30
+        },
+        "ask_consent_ref_on_arm": {
+          "type": "boolean",
+          "default": true
+        },
+        "consent_ref_pattern": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "regex",
+          "default": null
+        },
+        "start_reminder_text": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "detection": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "poll_interval_ms",
+        "start_debounce_s",
+        "stop_debounce_s",
+        "rules_file"
+      ],
+      "properties": {
+        "poll_interval_ms": {
+          "type": "integer",
+          "minimum": 250,
+          "maximum": 5000
+        },
+        "start_debounce_s": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 30
+        },
+        "stop_debounce_s": {
+          "type": "number",
+          "minimum": 2,
+          "maximum": 120
+        },
+        "rules_file": {
+          "type": "string",
+          "pattern": "^(builtin:default|.+\\.ya?ml)$",
+          "description": "'builtin:default' = packaged rules (captation/data/rules.default.yaml), or a path to a YAML file"
+        },
+        "user_rules_file": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "record_unknown_apps": {
+          "type": "boolean",
+          "default": false
+        },
+        "store_window_titles": {
+          "type": "boolean",
+          "default": false
+        }
+      }
+    },
+    "recording": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "audio",
+        "video"
+      ],
+      "properties": {
+        "audio": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "sample_rate",
+            "codec_preference",
+            "tracks"
+          ],
+          "properties": {
+            "sample_rate": {
+              "enum": [
+                44100,
+                48000
+              ]
+            },
+            "codec_preference": {
+              "type": "array",
+              "minItems": 1,
+              "uniqueItems": true,
+              "items": {
+                "enum": [
+                  "pcm_s24le",
+                  "pcm_s16le",
+                  "flac",
+                  "alac",
+                  "aac"
+                ]
+              }
+            },
+            "tracks": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "mix",
+                "remote",
+                "local"
+              ],
+              "description": "OBS track numbers. Uniqueness is checked by the config loader.",
+              "properties": {
+                "mix": {
+                  "const": 1
+                },
+                "remote": {
+                  "type": "integer",
+                  "minimum": 2,
+                  "maximum": 6
+                },
+                "local": {
+                  "type": "integer",
+                  "minimum": 2,
+                  "maximum": 6
+                },
+                "external": {
+                  "type": [
+                    "integer",
+                    "null"
+                  ],
+                  "minimum": 2,
+                  "maximum": 6
+                }
+              }
+            },
+            "external_input_device": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "default": null
+            },
+            "local_input": {
+              "type": "string",
+              "minLength": 1,
+              "default": "follow_default",
+              "description": "'follow_default' or an input device name; it must match the device the call app uses (QC detects a mismatch)"
+            }
+          }
+        },
+        "video": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "capture",
+            "fps",
+            "max_height"
+          ],
+          "properties": {
+            "capture": {
+              "enum": [
+                "window_preferred",
+                "display"
+              ]
+            },
+            "fps": {
+              "enum": [
+                15,
+                24,
+                25,
+                30
+              ]
+            },
+            "max_height": {
+              "enum": [
+                720,
+                1080,
+                1440
+              ]
+            },
+            "encoder_preference": {
+              "type": "array",
+              "uniqueItems": true,
+              "items": {
+                "enum": [
+                  "hardware",
+                  "x264"
+                ]
+              },
+              "default": [
+                "hardware",
+                "x264"
+              ]
+            }
+          }
+        },
+        "segments_on_mode_change": {
+          "type": "boolean",
+          "default": true
+        }
+      }
+    },
+    "obs": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "websocket",
+        "profile_audio",
+        "profile_video",
+        "scene_collection",
+        "exposure_policy"
+      ],
+      "properties": {
+        "executable": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null,
+          "description": "null → auto-detect"
+        },
+        "websocket": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "host",
+            "port"
+          ],
+          "properties": {
+            "host": {
+              "enum": [
+                "127.0.0.1",
+                "::1",
+                "localhost"
+              ]
+            },
+            "port": {
+              "type": "integer",
+              "minimum": 1024,
+              "maximum": 65535
+            },
+            "password_source": {
+              "enum": [
+                "keyring",
+                "env"
+              ],
+              "default": "keyring"
+            },
+            "password_env": {
+              "type": "string",
+              "default": "CAPTATION_OBS_PASSWORD"
+            }
+          }
+        },
+        "profile_audio": {
+          "type": "string",
+          "pattern": "^Captation"
+        },
+        "profile_video": {
+          "type": "string",
+          "pattern": "^Captation"
+        },
+        "scene_collection": {
+          "type": "string",
+          "pattern": "^Captation"
+        },
+        "launch_args": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": []
+        },
+        "launch_on": {
+          "enum": [
+            "arm",
+            "agent_start"
+          ],
+          "default": "arm"
+        },
+        "exposure_policy": {
+          "enum": [
+            "require_firewall",
+            "warn"
+          ],
+          "default": "require_firewall",
+          "description": "require_firewall: arming is refused until an inbound block rule for the websocket port is confirmed"
+        }
+      }
+    },
+    "postprocess": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "extract_tracks",
+        "audio_export_format",
+        "remux_video_to",
+        "keep_original_mkv",
+        "checksums"
+      ],
+      "properties": {
+        "extract_tracks": {
+          "type": "boolean"
+        },
+        "audio_export_format": {
+          "enum": [
+            "flac",
+            "wav"
+          ]
+        },
+        "remux_video_to": {
+          "enum": [
+            "mp4",
+            "mkv"
+          ]
+        },
+        "keep_original_mkv": {
+          "type": "boolean"
+        },
+        "checksums": {
+          "const": "sha256"
+        },
+        "make_read_only": {
+          "type": "boolean",
+          "default": true
+        }
+      }
+    },
+    "storage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "require_disk_encryption",
+        "min_free_gb"
+      ],
+      "properties": {
+        "require_disk_encryption": {
+          "enum": [
+            "off",
+            "warn",
+            "block"
+          ]
+        },
+        "min_free_gb": {
+          "type": "number",
+          "minimum": 1
+        },
+        "age_recipients": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^age1[0-9a-z]{58}$"
+          },
+          "default": []
+        },
+        "retention_days": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 1,
+          "default": null
+        }
+      }
+    },
+    "hooks": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "on_session_complete": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "default": null,
+          "description": "argv list. Placeholders: {session_dir} {session_id} {project_id}"
+        },
+        "timeout_s": {
+          "type": "integer",
+          "minimum": 10,
+          "maximum": 86400,
+          "default": 3600
+        }
+      }
+    },
+    "ui": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Tray indicator, countdown and reminder are mandatory (docs/principles.md §2.8) and cannot be configured away.",
+      "properties": {
+        "sound_on_start": {
+          "type": "boolean",
+          "default": true
+        }
+      }
+    },
+    "logging": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "level": {
+          "enum": [
+            "DEBUG",
+            "INFO",
+            "WARNING",
+            "ERROR"
+          ],
+          "default": "INFO"
+        },
+        "dir": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        }
+      }
+    },
+    "qc": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "silence_dbfs",
+        "silence_warn_s"
+      ],
+      "properties": {
+        "silence_dbfs": {
+          "type": "number",
+          "minimum": -90,
+          "maximum": -20
+        },
+        "silence_warn_s": {
+          "type": "number",
+          "minimum": 5,
+          "maximum": 600
+        }
+      }
+    },
+    "import": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "require_consent_ref"
+      ],
+      "properties": {
+        "require_consent_ref": {
+          "const": true
+        },
+        "allowed_extensions": {
+          "type": "array",
+          "uniqueItems": true,
+          "minItems": 1,
+          "items": {
+            "enum": [
+              "wav",
+              "flac",
+              "mp3",
+              "m4a",
+              "opus",
+              "ogg"
+            ]
+          },
+          "default": [
+            "wav",
+            "flac",
+            "mp3",
+            "m4a",
+            "opus",
+            "ogg"
+          ]
+        },
+        "max_file_gb": {
+          "type": "number",
+          "minimum": 0.1,
+          "maximum": 50,
+          "default": 4
+        }
+      }
+    }
+  }
+}

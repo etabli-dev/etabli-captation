@@ -1,0 +1,77 @@
+# Timeline format (tests/unit/test_session_scenarios.py):
+#   t        absolute monotonic seconds of the step (non-decreasing)
+#   event    a machine event (arm, disarm, auto_disarm_due, cancel, manual_stop, obs_lost,
+#            obs_back, low_disk, countdown_elapsed, segment_stopped, postprocess_done);
+#            without `event` the step is a probe snapshot (`mic`, `camera`, `camera_users`,
+#            `titles`) that is classified with the default rules and sent as a Tick
+#   context  optional check of the classifier verdict: "<app_id>/<mode>" or null
+#   expect   the exact commands of this step (compact form, see tests/unit/session_support.py)
+#   state    optional check of the state after the step
+name: Zoom meeting
+description: >-
+  A Zoom meeting is debounced, counted down and recorded in video mode. OBS holds the
+  microphone while recording and never counts as a call app. After the call ends the stop
+  debounce elapses and the session is finalised as complete.
+reqs: [R-01, R-10, R-17, R-19, R-35]
+apps:
+  zoom: {pid: 4242, process_name: zoom}
+  obs: {pid: 999, process_name: obs}
+exclude_pids: [999]
+steps:
+  - t: 0
+    event: arm
+    consent_ref: CR-2026-001
+    expect: [Armed, "SetTrayState(armed)", PrewarmObs]
+    state: ARMED_IDLE
+  - t: 1
+    mic: [zoom]
+    context: zoom/video
+    expect: []
+    state: PENDING_START
+  - t: 2
+    mic: [zoom]
+    expect: []
+    state: PENDING_START
+  - t: 4
+    mic: [zoom]
+    expect: ["BeginSession(zoom)", "NotifyCountdown(zoom,5)"]
+    state: COUNTDOWN
+  - t: 9
+    mic: [zoom, obs]
+    context: zoom/video
+    expect:
+      - CloseCountdown
+      - "SetTrayState(recording,video,zoom)"
+      - "StartSegment(1,video,rule:meeting_app)"
+      - "WriteSessionJson(recording)"
+      - ShowReminder
+    state: RECORDING
+  - t: 60
+    mic: [zoom, obs]
+    camera: true
+    camera_users: [zoom]
+    expect: []
+    state: RECORDING
+  - t: 61
+    mic: [obs]
+    context: null
+    expect: []
+    state: PENDING_STOP
+  - t: 70
+    mic: [obs]
+    expect: []
+    state: PENDING_STOP
+  - t: 71
+    mic: []
+    expect: ["StopSegment(1)", Teardown]
+    state: STOPPING
+  - t: 72
+    event: segment_stopped
+    expect: [RunPostprocess, "SetTrayState(armed)"]
+    state: POSTPROCESSING
+  - t: 80
+    event: postprocess_done
+    expect: ["WriteSessionJson(complete)"]
+    state: ARMED_IDLE
+final_state: ARMED_IDLE
+sessions: 1

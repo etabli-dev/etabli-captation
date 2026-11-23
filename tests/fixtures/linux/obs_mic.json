@@ -1,0 +1,33 @@
+{
+ "pw_dump": [
+  {
+   "id": 90,
+   "info": {
+    "props": {
+     "application.name": "OBS",
+     "application.process.binary": "obs",
+     "application.process.id": 2,
+     "client.id": 98,
+     "media.class": "Stream/Input/Audio",
+     "node.name": "OBS",
+     "pipewire.access.portal.app_id": "com.obsproject.Studio"
+    },
+    "state": "running"
+   },
+   "type": "PipeWire:Interface:Node"
+  },
+  {
+   "id": 98,
+   "info": {
+    "props": {
+     "application.name": "OBS",
+     "application.process.binary": "obs",
+     "application.process.id": 2,
+     "pipewire.access.portal.app_id": "com.obsproject.Studio",
+     "pipewire.sec.pid": 4627
+    }
+   },
+   "type": "PipeWire:Interface:Client"
+  }
+ ]
+}

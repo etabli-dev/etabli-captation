@@ -1,0 +1,29 @@
+{
+ "pw_dump": [
+  {
+   "id": 90,
+   "info": {
+    "props": {
+     "application.name": "fakecall-e2e",
+     "client.id": 98,
+     "media.class": "Stream/Input/Audio",
+     "node.name": "fakecall-e2e"
+    },
+    "state": "running"
+   },
+   "type": "PipeWire:Interface:Node"
+  },
+  {
+   "id": 98,
+   "info": {
+    "props": {
+     "application.name": "fakecall-e2e",
+     "application.process.binary": "fakecall-e2e",
+     "application.process.id": 3017438,
+     "pipewire.sec.pid": 3017438
+    }
+   },
+   "type": "PipeWire:Interface:Client"
+  }
+ ]
+}

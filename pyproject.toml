@@ -1,0 +1,91 @@
+[project]
+name = "etabli-captation"
+version = "0.1.0.dev0"
+description = "Records calls and online meetings through OBS Studio, only while armed and with prior written consent."
+readme = "README.md"
+requires-python = ">=3.12,<3.13"
+authors = [{ name = "R. Heller" }]
+dependencies = [
+    "pydantic>=2.14",
+    "jsonschema>=4.26",
+    "rfc3339-validator>=0.1.4",
+    "pyyaml>=6.0.4",
+    "typer>=0.29",
+    "keyring>=25.7",
+    "platformdirs>=4.14",
+    "websockets>=17.1",
+    # Linux tray and notifications (ADR-003)
+    "dbus-fast>=5.2; sys_platform == 'linux'",
+    # macOS / Windows tray and notifications (ADR-003, verified in stages 06/07)
+    "pystray>=0.19.5; sys_platform != 'linux'",
+    "pillow>=11.0; sys_platform != 'linux'",
+    "desktop-notifier>=6.2; sys_platform != 'linux'",
+    # Windows: map ConsentStore exe paths to PIDs (stage 07)
+    "psutil>=7.2; sys_platform == 'win32'",
+]
+
+[project.scripts]
+captation = "captation.cli:app"
+
+[dependency-groups]
+dev = [
+    "ruff>=0.17",
+    "mypy>=2.4",
+    "pytest>=9.0",
+    "pytest-timeout>=2.4",
+    "pytest-cov>=7.1",
+    "hypothesis>=6.170",
+    "numpy>=2.5",
+    "psutil>=7.2",
+    "types-pyyaml>=6.0",
+    "types-jsonschema>=4.26",
+]
+build = [
+    # Build tool only (GPL-2.0-or-later with bootloader exception, ADR-005); not shipped as a
+    # runtime dependency, so the licence gate does not apply to it.
+    "pyinstaller>=6.22",
+]
+
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/captation"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+src = ["src", "tests", "tools"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "RUF", "SIM", "C4", "PIE"]
+ignore = ["RUF001", "RUF002", "RUF003"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+mypy_path = "src"
+files = ["src"]
+
+[[tool.mypy.overrides]]
+module = ["keyring.*", "pystray.*", "desktop_notifier.*", "PIL.*"]
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra --strict-markers"
+timeout = 300
+markers = [
+    "obs: needs a real OBS Studio with obs-websocket",
+    "terms_gate: keep the real DISCLAIMER.md acceptance check (no autouse override)",
+    "e2e: end-to-end run with the real agent, OBS and OS",
+    "linux: Linux only",
+    "macos: macOS only",
+    "windows: Windows only",
+    "req(id): requirement ID(s) from docs/requirements.md covered by this test",
+]
+
+[tool.coverage.run]
+source = ["captation"]
+branch = true

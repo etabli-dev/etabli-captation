@@ -1,0 +1,45 @@
+name: Two apps at once
+description: >-
+  Signal and WhatsApp (same category) hold the microphone together. Without other hints the
+  rule order picks WhatsApp (c). When Signal also uses the camera it wins (b). Once Signal is
+  being recorded it stays the context although the camera goes off, because it is the
+  running session's app (a). When only WhatsApp is left, that is an app change.
+reqs: [R-05, R-09]
+apps:
+  signal: {pid: 300, process_name: signal-desktop}
+  whatsapp: {pid: 200, process_name: WhatsApp}
+steps:
+  - {t: 0, event: arm, consent_ref: CR-2026-007, expect: [Armed, "SetTrayState(armed)", PrewarmObs]}
+  - {t: 1, mic: [signal, whatsapp], context: whatsapp/audio, expect: [], state: PENDING_START}
+  - t: 2
+    mic: [signal, whatsapp]
+    camera: true
+    camera_users: [signal]
+    context: signal/video
+    expect: []
+    state: PENDING_START
+  - {t: 4, mic: [whatsapp, signal], camera: true, camera_users: [signal], expect: []}
+  - t: 5
+    mic: [signal, whatsapp]
+    camera: true
+    camera_users: [signal]
+    expect: ["BeginSession(signal)", "NotifyCountdown(signal,5)"]
+    state: COUNTDOWN
+  - t: 10
+    mic: [whatsapp, signal]
+    camera: true
+    camera_users: [signal]
+    expect:
+      - CloseCountdown
+      - "SetTrayState(recording,video,signal)"
+      - "StartSegment(1,video,rule:camera_active)"
+      - "WriteSessionJson(recording)"
+      - ShowReminder
+    state: RECORDING
+  - {t: 20, mic: [whatsapp, signal], camera: false, context: signal/audio, expect: [], state: RECORDING}
+  - {t: 30, mic: [whatsapp], context: whatsapp/audio, expect: ["StopSegment(1)", Teardown], state: STOPPING}
+  - {t: 31, event: segment_stopped, expect: [RunPostprocess, "SetTrayState(armed)"]}
+  - {t: 32, event: postprocess_done, expect: ["WriteSessionJson(complete)"], state: PENDING_START}
+  - {t: 33, mic: [], expect: [], state: ARMED_IDLE}
+final_state: ARMED_IDLE
+sessions: 1

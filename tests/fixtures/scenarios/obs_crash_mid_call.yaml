@@ -1,0 +1,33 @@
+name: OBS crash in the middle of a call
+description: >-
+  OBS is lost while recording a Zoom meeting. The segment is marked interrupted. When OBS is
+  back and the meeting is still present, segment 2 starts (recovery:obs_restart) in the same
+  session. The session ends with status interrupted.
+reqs: [R-53]
+apps:
+  zoom: {pid: 4242, process_name: zoom}
+steps:
+  - {t: 0, event: arm, consent_ref: CR-2026-006, expect: [Armed, "SetTrayState(armed)", PrewarmObs]}
+  - {t: 1, mic: [zoom], expect: [], state: PENDING_START}
+  - {t: 4, mic: [zoom], expect: ["BeginSession(zoom)", "NotifyCountdown(zoom,5)"]}
+  - t: 9
+    mic: [zoom]
+    expect:
+      - CloseCountdown
+      - "SetTrayState(recording,video,zoom)"
+      - "StartSegment(1,video,rule:meeting_app)"
+      - "WriteSessionJson(recording)"
+      - ShowReminder
+    state: RECORDING
+  - {t: 20, event: obs_lost, expect: ["MarkSegmentInterrupted(1)", "Notify(obs_lost)"], state: ERROR}
+  - {t: 21, mic: [zoom], expect: [], state: ERROR}
+  - t: 25
+    event: obs_back
+    expect: ["StartSegment(2,video,recovery:obs_restart)", "WriteSessionJson(recording)"]
+    state: RECORDING
+  - {t: 40, mic: [], expect: [], state: PENDING_STOP}
+  - {t: 50, mic: [], expect: ["StopSegment(2)", Teardown], state: STOPPING}
+  - {t: 51, event: segment_stopped, expect: [RunPostprocess, "SetTrayState(armed)"]}
+  - {t: 60, event: postprocess_done, expect: ["WriteSessionJson(interrupted)"], state: ARMED_IDLE}
+final_state: ARMED_IDLE
+sessions: 1

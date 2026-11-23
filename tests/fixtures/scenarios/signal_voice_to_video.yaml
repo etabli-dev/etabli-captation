@@ -1,0 +1,43 @@
+name: Signal voice call that turns into a video call
+description: >-
+  A Signal voice call is recorded in audio mode. When the camera goes on, segment 1 is
+  stopped and a video segment 2 starts without a new countdown (upgrade:camera_on). When the
+  camera goes off again, the mode stays video (never downgrade).
+reqs: [R-02, R-03, R-08]
+apps:
+  signal: {pid: 300, process_name: signal-desktop}
+steps:
+  - {t: 0, event: arm, consent_ref: CR-2026-002, expect: [Armed, "SetTrayState(armed)", PrewarmObs]}
+  - {t: 1, mic: [signal], context: signal/audio, expect: [], state: PENDING_START}
+  - t: 4
+    mic: [signal]
+    expect: ["BeginSession(signal)", "NotifyCountdown(signal,5)"]
+    state: COUNTDOWN
+  - t: 9
+    mic: [signal]
+    expect:
+      - CloseCountdown
+      - "SetTrayState(recording,audio,signal)"
+      - "StartSegment(1,audio,rule:default)"
+      - "WriteSessionJson(recording)"
+      - ShowReminder
+    state: RECORDING
+  - t: 30
+    mic: [signal]
+    camera: true
+    camera_users: [signal]
+    context: signal/video
+    expect:
+      - "StopSegment(1)"
+      - Teardown
+      - "SetTrayState(recording,video,signal)"
+      - "StartSegment(2,video,upgrade:camera_on)"
+      - "WriteSessionJson(recording)"
+    state: RECORDING
+  - {t: 45, mic: [signal], camera: false, context: signal/audio, expect: [], state: RECORDING}
+  - {t: 46, mic: [], expect: [], state: PENDING_STOP}
+  - {t: 56, mic: [], expect: ["StopSegment(2)", Teardown], state: STOPPING}
+  - {t: 57, event: segment_stopped, expect: [RunPostprocess, "SetTrayState(armed)"]}
+  - {t: 60, event: postprocess_done, expect: ["WriteSessionJson(complete)"], state: ARMED_IDLE}
+final_state: ARMED_IDLE
+sessions: 1

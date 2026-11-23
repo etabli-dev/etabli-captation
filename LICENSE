@@ -1,0 +1,36 @@
+Copyright (c) 2026 R. Heller. All rights reserved.
+
+This software, including its source code, documentation, icons, artwork and
+other materials in this repository (the "Software"), is proprietary. The
+source code is published for transparency and review only ("source
+available"); it is NOT open source.
+
+No licence is granted. Any use of the Software requires the PRIOR WRITTEN
+APPROVAL of the copyright holder. Without it you may not run, install, use,
+copy, modify, merge, publish, distribute, sublicense, sell or create
+derivative works of the Software, in whole or in part.
+
+Being able to view this repository, or to fork it on GitHub as the GitHub
+Terms of Service permit, does not grant any further rights.
+
+An approved use is additionally subject to DISCLAIMER.md (disclaimer and
+conditions of use), which every user must accept with the checkbox shown by
+`captation accept` before the first use. Every recording requires the prior,
+documented consent of all persons recorded and, for research, the approval of
+the responsible ethics committee and data protection officer.
+
+Third-party components used by the Software remain under their own licences
+(see docs/licensing.md). OBS Studio is a separate program and is not part of
+the Software. Nothing in this notice restricts rights you have under those
+licences.
+
+Licensing enquiries and approvals: etabli.dev@outlook.com
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. TO THE EXTENT PERMITTED
+BY LAW, IN NO EVENT SHALL THE AUTHOR OR COPYRIGHT HOLDER BE LIABLE FOR ANY
+CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR
+OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE
+OR OTHER DEALINGS IN THE SOFTWARE. Section 7 of DISCLAIMER.md (liability
+under German law) applies in addition and prevails where it is more specific.

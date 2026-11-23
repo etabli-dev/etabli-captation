@@ -1,0 +1,32 @@
+name: Browser without window titles, camera on
+description: >-
+  A browser renderer process holds the microphone (attributed to its parent browser), no
+  window titles are available (e.g. Wayland) and the OS cannot attribute the camera. The
+  call stays category browser and is recorded in video mode because the camera is active.
+reqs: [R-02, R-04, R-07]
+apps:
+  renderer:
+    pid: 510
+    process_name: Google Chrome Helper (Renderer)
+    parent_app: Google Chrome
+steps:
+  - {t: 0, event: arm, consent_ref: CR-2026-009, expect: [Armed, "SetTrayState(armed)", PrewarmObs]}
+  - {t: 1, mic: [renderer], camera: true, titles: null, context: browser/video, expect: [], state: PENDING_START}
+  - {t: 4, mic: [renderer], camera: true, expect: ["BeginSession(browser)", "NotifyCountdown(browser,5)"]}
+  - t: 9
+    mic: [renderer]
+    camera: true
+    expect:
+      - CloseCountdown
+      - "SetTrayState(recording,video,browser)"
+      - "StartSegment(1,video,rule:camera_active)"
+      - "WriteSessionJson(recording)"
+      - ShowReminder
+    state: RECORDING
+  - {t: 30, mic: [renderer], camera: false, context: browser/audio, expect: [], state: RECORDING}
+  - {t: 31, mic: [], expect: [], state: PENDING_STOP}
+  - {t: 41, mic: [], expect: ["StopSegment(1)", Teardown], state: STOPPING}
+  - {t: 42, event: segment_stopped, expect: [RunPostprocess, "SetTrayState(armed)"]}
+  - {t: 45, event: postprocess_done, expect: ["WriteSessionJson(complete)"], state: ARMED_IDLE}
+final_state: ARMED_IDLE
+sessions: 1
