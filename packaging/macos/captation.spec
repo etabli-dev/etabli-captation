@@ -55,6 +55,10 @@ a = Analysis(  # noqa: F821
     # pystray (LGPL-3.0) stays a separate, replaceable module (docs/licensing.md): its .py
     # source files are collected as files next to the other bundled files, not into the PYZ.
     module_collection_mode={"pystray": "py"},
+    # Dev-only tools reach the bundle through optional imports in third-party PyInstaller hooks
+    # (pydantic's mypy plugin, Pillow's numpy support) whenever uv's default `dev` group is
+    # installed, as in release.yml. The agent imports none of them.
+    excludes=["mypy", "hypothesis", "numpy", "pytest", "_pytest", "coverage", "pytest_cov"],
     # tkinter stays in: `captation accept` shows the DISCLAIMER.md checkbox dialog with it (R-59).
 )
 pyz = PYZ(a.pure)  # noqa: F821
