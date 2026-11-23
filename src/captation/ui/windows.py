@@ -1,6 +1,6 @@
 """Windows tray and notification back end (ADR-003): pystray + desktop-notifier
 (``captation.ui.pystray_ui``) plus a native sound, the consent-reference dialog and the
-AppUserModelID that Windows needs for toast buttons (stage 09 task 7, stage 11).
+AppUserModelID that Windows needs for toast buttons .
 
 Prepared on Linux, verified on Windows (ADR-015, ``docs/runbook-windows.md``).
 

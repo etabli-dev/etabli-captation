@@ -29,3 +29,6 @@ echo "  captation obs firewall --apply     # blocks the websocket port for the L
 echo "  captation obs approve-screen       # one-time screen-capture approval (Wayland)"
 echo "  captation install-autostart        # start at login (always disarmed)"
 echo "  captation doctor                   # check everything"
+echo
+echo "Example configuration: $target/current/config.example.yaml"
+echo "  (copy it to ${XDG_CONFIG_HOME:-$HOME/.config}/captation/config.yaml and adjust)"

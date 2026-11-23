@@ -111,8 +111,8 @@ availability, OS APIs and process or bundle names differ between versions.
 - Every change is backed by evidence: tests, `tools/check_facts.py`, `tools/sync_specs.py
   --check`, ruff, `mypy --strict`, `tools/licence_gate.py`, and `tools/traceability.py`
   (requirement → test matrix).
-- Checkpoints (platform facts, end-to-end runs, release) are decided by the owner and recorded
-  in `docs/decisions.md`.
+- Sign-off on platform facts, end-to-end runs and releases is given by the maintainer and
+  recorded in `docs/decisions.md`.
 
 ## 8. Code conventions
 

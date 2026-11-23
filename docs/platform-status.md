@@ -3,33 +3,34 @@
 State on 2026-11-23. Linux is built and tested end to end; macOS and Windows are prepared on
 Linux (ADR-015) and need their final steps on their own machines.
 
-| Stage | Linux | macOS | Windows |
+| Area | Linux | macOS | Windows |
 |---|---|---|---|
-| 01 Spec, requirements, decisions ⛳ | done | – | – |
-| 02 Scaffold, config, CLI, IPC, tooling, CI | done | – | – |
-| 03 OBS bootstrap, facts, firewall ⛳ (per OS) | done | prepared → `runbook-macos.md` §6 | prepared → `runbook-windows.md` §3 |
-| 04 OBS control layer | done (integration on Linux) | run integration tests | run integration tests |
-| 05/06/07 Detection | 05 done | 06 prepared (Swift probe not yet built) → §7 | 07 prepared → §4 |
-| 08 Classifier and state machine | done | – | – |
-| 09 Consent guard, tray, notifications | done (smoke test with a stub tray host; screen was locked) | smoke test → §11 | smoke test → §5 |
-| 10 Post-processing, QC, storage | done | – | – |
-| 11 Autostart, doctor, packaging (per OS) | done | → §11 | → §6 |
-| 12 Tests and E2E ⛳ (per OS) | automated E1–E13 done; real-app checklist open | → §12 | → §7 |
-| 13 Mobile import | done | – | – |
-| 14 Release audit ⛳ | review done, findings fixed; owner decisions recorded (ADR-016, ADR-017) | – | – |
+| Specification, requirements, decisions | done | – | – |
+| Scaffold, configuration, CLI, IPC, tooling, CI | done | – | – |
+| OBS setup and platform facts (bootstrap, facts, firewall) | done | prepared → `runbook-macos.md` §6 | prepared → `runbook-windows.md` §3 |
+| OBS control layer | done (integration tests on Linux) | run integration tests | run integration tests |
+| Call and camera detection | done | prepared (Swift probe not yet built) → §7 | prepared → §4 |
+| Classifier and session state machine | done | – | – |
+| Consent guard, tray, notifications | done (smoke test with a stub tray host; the screen was locked) | smoke test → §11 | smoke test → §5 |
+| Post-processing, QC, storage | done | – | – |
+| Autostart, doctor, packaging | done | → §11 | → §6 |
+| End-to-end checks | automated E1–E13 done; real-app checklist open | → §12 | → §7 |
+| Mobile import | done | – | – |
+| Release review | review done, findings fixed; decisions recorded (ADR-016, ADR-017) | – | – |
 
 **Pending facts** (`python tools/check_facts.py --os <os>` lists them): macOS PF-101…128,
 Windows PF-201…270. Each row in `docs/platform-facts.md` names the command that verifies it.
-`check_facts.py --release` (release workflow) fails until every pending fact is verified.
+`check_facts.py --release --os <os>` (release workflow) blocks that OS's build until its pending
+facts are verified; Linux is released independently.
 
-## Before the session on the Mac or the Windows PC
+## On the Mac or the Windows PC
 
 1. `git clone` / `git pull` this repository (`etabli-dev/etabli-captation`).
-2. Copy your local, untracked build notes from the Linux clone if you use them (`STATE.md`,
-   `reports/`: git-ignored; the runbooks name the report files they expect).
-3. Follow `docs/runbook-macos.md` or `docs/runbook-windows.md` from the top.
+2. Follow `docs/runbook-macos.md` or `docs/runbook-windows.md` from the top.
+3. Record verified facts in `docs/platform-facts.md` and the end-to-end results in the release
+   notes.
 
-## Owner decisions (2026-11-23, ADR-016)
+## Decisions (2026-11-23, ADR-016)
 
 Proprietary licence · recordings only on encrypted storage (`block`) · OBS start-up egress
 accepted · Windows fully supported in v1 · video = meeting window · Linux OBS = Flatpak ·

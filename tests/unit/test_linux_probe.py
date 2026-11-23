@@ -20,7 +20,7 @@ from captation.platform.linux import (
 )
 
 FIXTURES = Path(__file__).resolve().parents[1] / "fixtures" / "linux"
-pytestmark = pytest.mark.skipif(os.name != "posix", reason="Linux probe")
+pytestmark = pytest.mark.linux  # Linux probe (pw-dump, /proc); macOS: test_macos_probe.py
 
 
 def load(name: str) -> dict[str, Any]:

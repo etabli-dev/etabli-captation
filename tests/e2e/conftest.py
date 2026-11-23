@@ -5,7 +5,7 @@ it is not collected at all, because its imports need Linux-only dependencies.
 
 The agent under test refuses to arm until DISCLAIMER.md is accepted (R-59). The suite never
 touches the user's own acceptance: it points ``XDG_STATE_HOME`` at its own directory and writes a
-``test-environment`` record there.
+simulated terminal-checkbox record there (user ``e2e-test``).
 """
 
 import sys
@@ -50,7 +50,7 @@ else:
                         "sha256": terms.text_digest(text),
                         "accepted_at": datetime.now().astimezone().isoformat(timespec="seconds"),
                         "user": "e2e-test",
-                        "method": "test-environment",
+                        "method": "terminal-checkbox",
                         "app_version": __version__,
                     }
                 ),

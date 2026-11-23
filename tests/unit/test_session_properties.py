@@ -1,4 +1,4 @@
-"""Property-based tests (hypothesis) for the consent and correctness invariants (stage 08).
+"""Property-based tests (hypothesis) for the consent and correctness invariants.
 
 1. never ``RECORDING`` while disarmed;
 2. at most one active segment (and one open session);

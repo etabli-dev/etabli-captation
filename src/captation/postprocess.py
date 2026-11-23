@@ -1,4 +1,4 @@
-"""Post-processing of OBS segments: inventory, track extraction, remux (stage 10).
+"""Post-processing of OBS segments: inventory, track extraction, remux.
 
 Media-producing ffmpeg commands only copy streams (``-c copy``) or re-encode losslessly to FLAC
 or 24-bit PCM. They never resample, normalise or filter. All outputs are written to a hidden

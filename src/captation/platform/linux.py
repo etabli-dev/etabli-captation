@@ -1,5 +1,5 @@
-"""Linux platform services: OBS locator (stage 03), PipeWire probe (stage 05),
-XDG/systemd autostart and dm-crypt check (stage 11).
+"""Linux platform services: OBS locator, PipeWire probe,
+XDG/systemd autostart and dm-crypt check.
 
 Every OS-specific string constant carries a ``# PF-xxx`` reference (tools/check_facts.py).
 """
@@ -97,7 +97,7 @@ def obs_host_pids(installation: ObsInstallation) -> frozenset[int]:
     return frozenset(pids)
 
 
-# ---- PipeWire probe (stage 05) -----------------------------------------------------------------
+# ---- PipeWire probe -----------------------------------------------------------------
 
 PW_DUMP = "pw-dump"  # PF-016
 PW_TIMEOUT_S = 2.0
@@ -115,6 +115,21 @@ K_PID = "application.process.id"  # PF-016
 K_HOST_PID = "pipewire.sec.pid"  # PF-016
 K_APP_NAME = "application.name"  # PF-016
 K_PORTAL_APP = "pipewire.access.portal.app_id"  # PF-013
+K_MEDIA_NAME = "media.name"  # PF-026
+# Firefox-family browsers name the capture stream after the capturing tab's title (PF-026);
+# Chromium-family browsers use a fixed name (PF-018, PF-024, PF-025).
+TAB_TITLE_BINARIES = frozenset(
+    (
+        "firefox",  # PF-026
+        "firefox-bin",  # PF-026 (Flatpak and tarball builds)
+        "firefox-esr",  # PF-026 (same engine)
+        "librewolf",  # PF-026 (Firefox fork)
+        "zen",  # PF-026 (Firefox fork)
+        "zen-bin",  # PF-026 (Firefox fork)
+        "floorp",  # PF-026 (Firefox fork)
+        "waterfox",  # PF-026 (Firefox fork)
+    )
+)
 OBS_PROCESS = "obs"  # PF-013
 VIDEO_DEVICE_PREFIX = "/dev/video"  # PF-017
 # Defensive heuristic for browser helper processes; Chrome itself needs none (PF-018).
@@ -239,14 +254,28 @@ def app_ref(node: dict[str, Any], client: dict[str, Any] | None, proc: Path) -> 
     parent = _parent_app(pid, binary, proc)
     if parent is None and app_name and str(app_name) != binary:
         parent = str(app_name)
-    return AppRef(pid=pid, process_name=binary, exe_path=exe, parent_app=parent)
+    # A Flatpak app is identified by its app ID; rules match it as `package` (PF-013).
+    package = str(portal) if portal and portal != FLATPAK_APP_ID else None
+    return AppRef(pid=pid, process_name=binary, exe_path=exe, package_id=package, parent_app=parent)
+
+
+def stream_title(node: dict[str, Any], ref: AppRef) -> str | None:
+    """The tab title a Firefox-family browser puts into the capture stream's name (PF-026)."""
+    if ref.process_name.lower() not in TAB_TITLE_BINARIES:
+        return None
+    name = str(_props(node).get(K_MEDIA_NAME) or "").strip()
+    return name or None
 
 
 def parse_pw_dump(
     objects: Iterable[dict[str, Any]],
     proc: Path = Path("/proc"),  # PF-017
+    titles: dict[int, list[str]] | None = None,
 ) -> tuple[list[AppRef], list[AppRef]]:
-    """(mic users, camera users) from a pw-dump document. Only running stream nodes count."""
+    """(mic users, camera users) from a pw-dump document. Only running stream nodes count.
+
+    With ``titles`` given, tab titles of capturing browser streams are collected into it by PID
+    (in memory only; principles §3.1)."""
     objs = list(objects)
     clients = {o.get("id"): o for o in objs if o.get("type") == CLIENT_TYPE}  # PF-016
     mic: list[AppRef] = []
@@ -262,6 +291,9 @@ def parse_pw_dump(
         ref = app_ref(obj, clients.get(props.get(K_CLIENT)), proc)
         if ref is not None:
             (mic if cls == MIC_CLASS else cam).append(ref)
+            title = stream_title(obj, ref) if titles is not None and cls == MIC_CLASS else None
+            if title is not None and titles is not None:
+                titles.setdefault(ref.pid, []).append(title)
     return _unique(mic), _unique(cam)
 
 
@@ -330,9 +362,11 @@ class LinuxProbe:
     def set_exclude_pids(self, pids: frozenset[int]) -> None:
         self._exclude = pids | {os.getpid()}
 
-    def _titles(self) -> dict[int, tuple[str, ...]] | None:
-        """Window titles: unavailable on Wayland (PF-019). An X11 path (wmctrl) is not
-        implemented until it can be verified on an X11 session (docs/known-limitations.md)."""
+    def _titles(self, streams: dict[int, list[str]]) -> dict[int, tuple[str, ...]] | None:
+        """Window titles are unavailable on Wayland (PF-019; an X11 path is not implemented).
+        Firefox-family browsers still report the capturing tab's title (PF-026)."""
+        if streams:
+            return {pid: tuple(sorted(set(names))) for pid, names in streams.items()}
         if not self._wayland_logged:
             session = os.environ.get(SESSION_TYPE_VAR, "unknown")  # not-a-fact: log label
             log.info("probe: window titles unavailable (session type %s)", session)
@@ -344,11 +378,13 @@ class LinuxProbe:
         confidence: Any = "high"  # not-a-fact: internal status value
         mic: list[AppRef] = []
         cam: list[AppRef] = []
+        stream_titles: dict[int, list[str]] = {}
         try:
             out = self._runner([PW_DUMP], PW_TIMEOUT_S)
             if out.returncode != 0:
                 raise ValueError("pw-dump failed")
-            mic, cam = parse_pw_dump(json.loads(out.stdout or "[]"), self._proc)  # PF-020
+            doc = json.loads(out.stdout or "[]")  # not-a-fact: empty pw-dump document
+            mic, cam = parse_pw_dump(doc, self._proc, stream_titles)  # PF-020
         except (ValueError, OSError, subprocess.TimeoutExpired):
             log.warning("probe: pw-dump unavailable, microphone detection is degraded")
             confidence = "low"  # not-a-fact: internal status value
@@ -370,7 +406,7 @@ class LinuxProbe:
             mic_users=tuple(mic),
             camera_active=bool(cam),
             camera_users=tuple(cam),
-            window_titles=self._titles(),
+            window_titles=self._titles(stream_titles),
             confidence=confidence,
         )
 
@@ -378,7 +414,7 @@ class LinuxProbe:
         return None
 
 
-# ---- disk encryption (stage 10/11) ---------------------------------------------------------------
+# ---- disk encryption ---------------------------------------------------------------
 
 LUKS_TYPE = "crypt"  # PF-020
 PLAIN_FS = frozenset({"ext4", "ext3", "xfs", "btrfs", "vfat", "exfat", "f2fs"})  # PF-020
@@ -422,7 +458,7 @@ class LinuxDiskEncryption:
         )  # not-a-fact: internal status value
 
 
-# ---- autostart (stage 11) ------------------------------------------------------------------
+# ---- autostart ------------------------------------------------------------------
 
 ENCODING = "utf-8"  # not-a-fact: text encoding
 AUTOSTART_DIR = ".config/autostart"  # PF-021
@@ -530,7 +566,13 @@ class LinuxPlatform:
     def obs_locator(self, executable: str | None) -> LinuxObsLocator:
         return LinuxObsLocator(executable)
 
-    def probe(self, *, exclude_pids: frozenset[int], store_titles: bool) -> LinuxProbe:
+    def probe(
+        self,
+        *,
+        exclude_pids: frozenset[int],
+        store_titles: bool,
+        obs_capturing: Callable[[], bool] | None = None,
+    ) -> LinuxProbe:
         # Titles are read in memory on X11 regardless; store_titles only affects storage.
         return LinuxProbe(exclude_pids=exclude_pids)
 

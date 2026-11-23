@@ -1,4 +1,4 @@
-"""Task Scheduler autostart, AppUserModelID registration and the BitLocker check (stage 11),
+"""Task Scheduler autostart, AppUserModelID registration and the BitLocker check,
 tested on Linux with a fake runner and a fake registry."""
 
 from __future__ import annotations

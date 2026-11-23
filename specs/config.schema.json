@@ -120,11 +120,19 @@
         },
         "record_unknown_apps": {
           "type": "boolean",
-          "default": false
+          "default": true,
+          "description": "Record apps that match no rule (category unknown: audio, video if the camera is on). Countdown, Cancel and indicator apply as always."
         },
         "store_window_titles": {
           "type": "boolean",
           "default": false
+        },
+        "extra_meeting_titles": {
+          "type": "array",
+          "default": [],
+          "maxItems": 50,
+          "items": {"type": "string", "format": "regex", "minLength": 1, "maxLength": 300},
+          "description": "Regexes for meeting pages of your own instances (e.g. a BigBlueButton client title, a branded Cisco Meeting Server web app). Matched against normalised browser window titles; a match records as category meeting (app ID web_meeting)."
         }
       }
     },

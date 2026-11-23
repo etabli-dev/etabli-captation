@@ -1,7 +1,8 @@
-"""Bootstrap, credentials, facts, firewall, launcher and manage (stage 03 code, unit level)."""
+"""Bootstrap, credentials, facts, firewall, launcher and manage (unit level)."""
 
 from __future__ import annotations
 
+import ipaddress
 import json
 import os
 import socket
@@ -278,8 +279,62 @@ def test_firewall_probes_on_loopback() -> None:
         port = srv.getsockname()[1]
         assert firewall.connect_from("127.0.0.1", port) is True
         assert firewall.connect_from("127.0.0.1", 1) is False
-    assert isinstance(firewall.local_addresses(), list)
-    assert isinstance(firewall.listening_publicly(1), bool)
+        # the real `ss`: a loopback-only listener is not public
+        assert firewall.listening_publicly(port) is False
+    # the real `ip -j addr`: only global-scope, non-loopback addresses
+    for addr in firewall.local_addresses():
+        assert not ipaddress.ip_address(addr).is_loopback
+        assert not ipaddress.ip_address(addr).is_link_local
+
+
+IP_ADDR_JSON = json.dumps(
+    [
+        {"ifname": "lo", "addr_info": [{"local": "127.0.0.1", "scope": "host"}]},
+        {
+            "ifname": "eth0",
+            "addr_info": [
+                {"local": "192.0.2.10", "scope": "global"},
+                {"local": "fe80::1", "scope": "link"},
+                {"local": "2001:db8::10", "scope": "global"},
+            ],
+        },
+        {"ifname": "docker0", "addr_info": [{"local": "172.17.0.1", "scope": "global"}]},
+        {"ifname": "lo2", "addr_info": [{"scope": "global"}]},  # no address: ignored
+    ]
+)
+SS_LINES = {
+    "public4": "LISTEN 0 4096 0.0.0.0:4455 0.0.0.0:*\n",
+    "public6": "LISTEN 0 4096 *:4455 *:*\n",
+    "lan": "LISTEN 0 4096 192.0.2.10:4455 0.0.0.0:*\n",
+    "loopback": "LISTEN 0 4096 127.0.0.1:4455 0.0.0.0:*\nLISTEN 0 4096 [::1]:4455 [::]:*\n",
+    "none": "",
+}
+
+
+@pytest.mark.linux
+@pytest.mark.parametrize(
+    ("ss_out", "public"),
+    [("public4", True), ("public6", True), ("lan", True), ("loopback", False), ("none", False)],
+)
+def test_firewall_parses_ip_and_ss_output(
+    monkeypatch: pytest.MonkeyPatch, ss_out: str, public: bool
+) -> None:
+    ran: list[list[str]] = []
+
+    def fake_run(argv: list[str]) -> subprocess.CompletedProcess[str]:
+        ran.append(argv)
+        out = IP_ADDR_JSON if argv[0] == "ip" else SS_LINES[ss_out]
+        return subprocess.CompletedProcess(argv, 0, stdout=out, stderr="")
+
+    monkeypatch.setattr(firewall, "_run", fake_run)
+    monkeypatch.setattr(firewall, "current_os", lambda: "linux")
+    assert firewall.local_addresses() == ["192.0.2.10", "2001:db8::10", "172.17.0.1"]
+    assert firewall.listening_publicly(4455) is public
+    assert ["ss", "-ltnH", "sport = :4455"] in ran
+    monkeypatch.setattr(
+        firewall, "_run", lambda argv: subprocess.CompletedProcess(argv, 1, stdout="", stderr="x")
+    )
+    assert firewall.local_addresses() == []  # `ip` failed: nothing to probe
 
 
 # ---- launcher / manage ------------------------------------------------------------------------

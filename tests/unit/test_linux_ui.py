@@ -1,8 +1,7 @@
-"""Linux tray + notifications against a stub desktop on a private D-Bus (stage 09)."""
+"""Linux tray + notifications against a stub desktop on a private D-Bus."""
 
 from __future__ import annotations
 
-import threading
 import time
 from collections.abc import Callable
 
@@ -11,7 +10,7 @@ import pytest
 pytest.importorskip("dbus_fast", reason="Linux-only dependency")
 
 from captation.ui.i18n import STRINGS, Strings
-from captation.ui.linux import LinuxUi, circle_pixmap
+from captation.ui.linux import COLOURS, LinuxUi, circle_pixmap
 from captation.ui.notify import ConsentUi, UiHandlers
 from tests.dbus_stub import StubDesktop, stub_desktop
 
@@ -23,6 +22,16 @@ def wait_for(pred: Callable[[], bool], timeout: float = 3) -> bool:
     while time.monotonic() < end:
         if pred():
             return True
+        time.sleep(0.02)
+    return pred()
+
+
+def holds_for(pred: Callable[[], bool], seconds: float) -> bool:
+    """True if ``pred`` stays true for the whole window (polled, fails at the first miss)."""
+    end = time.monotonic() + seconds
+    while time.monotonic() < end:
+        if not pred():
+            return False
         time.sleep(0.02)
     return pred()
 
@@ -106,16 +115,19 @@ def test_menu_layout_and_clicks() -> None:
                 [4, "clicked", Variant("s", ""), 0],
             )
             assert wait_for(lambda: calls == ["cancel"])
-            desk.call(
-                name,
-                "/MenuBar",
-                "com.canonical.dbusmenu",
-                "Event",
-                "isvu",
-                [3, "clicked", Variant("s", ""), 0],
-            )
-            time.sleep(0.2)
-            assert calls == ["cancel"]  # disabled item: ignored
+            # a click on the disabled item is ignored; an enabled item clicked after it shows
+            # that the event was processed (callbacks run in their own threads, in order)
+            for item_id in (3, 6):  # "Studienmodus aktivieren…" (disabled), "… beenden"
+                desk.call(
+                    name,
+                    "/MenuBar",
+                    "com.canonical.dbusmenu",
+                    "Event",
+                    "isvu",
+                    [item_id, "clicked", Variant("s", ""), 0],
+                )
+            assert wait_for(lambda: "disarm" in calls)
+            assert calls == ["cancel", "disarm"]
         finally:
             ui.stop()
 
@@ -213,12 +225,26 @@ def test_pixmap_geometry() -> None:
 
 
 def test_blink_toggles() -> None:
+    attention = circle_pixmap(32, COLOURS["attention"])
+    disarmed = circle_pixmap(32, COLOURS["disarmed"])
     with stub_desktop() as desk:
         ui = make_ui(desk, [])
         try:
+            name = desk.watcher.items[0]
+            sni = ("/StatusNotifierItem", "org.kde.StatusNotifierItem")
+
+            def icon() -> tuple[int, int, bytes]:
+                w, h, data = desk.get_prop(name, *sni, "IconPixmap")[2]
+                return (w, h, bytes(data))
+
+            assert icon() == disarmed
             ui.backend.set_blink(True)
-            time.sleep(0.7)
+            # the icon alternates between the attention colour and the state colour
+            assert wait_for(lambda: icon() == attention)
+            assert wait_for(lambda: icon() == disarmed)
+            assert wait_for(lambda: icon() == attention)
             ui.backend.set_blink(False)
-            assert threading.active_count() >= 1
+            assert wait_for(lambda: icon() == disarmed)
+            assert holds_for(lambda: icon() == disarmed, 0.8)  # longer than one blink phase
         finally:
             ui.stop()

@@ -92,8 +92,8 @@ recording. The software stores only a consent *reference*, never the consent doc
 The consent guard, countdown, indicator, firewall rule, encryption check and quality checks
 reduce risks; they do **not** make a recording lawful. Detection can fail (missed or late
 starts, wrong app, other on-screen content in screen captures, silent tracks). OBS Studio itself
-contacts third-party services at start-up (see `docs/known-limitations.md`). Check every
-recording and its warnings.
+contacts third-party services at start-up (see the project documentation,
+`docs/known-limitations.md` in the source repository). Check every recording and its warnings.
 
 ### 6. No legal advice
 
@@ -110,8 +110,9 @@ loss of data, fines or claims arising from the use or inability to use the softw
 health, under the German Product Liability Act, or where liability cannot be excluded or limited
 by law.** For a slightly negligent breach of an essential obligation (one whose fulfilment makes
 the proper use possible in the first place and on which you may regularly rely), liability is
-limited to the foreseeable damage typical for this kind of provision. To the extent permitted by law, you indemnify the copyright holder against third-party
-claims resulting from your unlawful use of the software.
+limited to the foreseeable damage typical for this kind of provision. To the extent permitted by
+law, you indemnify the copyright holder against third-party claims resulting from your unlawful
+use of the software.
 
 ### 8. Third-party software
 
@@ -121,9 +122,10 @@ licences. Captation does not include OBS Studio; it controls it as a separate pr
 ### 9. Acceptance
 
 Before the first use, the software shows this text and asks you to tick a checkbox. The
-acceptance (text version, a checksum of this text, time, operating-system user name and method)
-is stored locally in the user's state directory. When this text changes, it must be accepted
-again. Acceptance does not replace the approvals in the strict notice above.
+acceptance (text version, a checksum of this text, time, operating-system user name, method of
+acceptance and the version of the software) is stored locally in the user's state directory.
+When this text changes, it must be accepted again. Acceptance does not replace the approvals in
+the strict notice above.
 
 ### 10. Applicable law
 
@@ -205,8 +207,8 @@ Einwilligungsschutz, Countdown, Aufnahmesymbol, Firewall-Regel, Verschlüsselung
 Qualitätskontrollen verringern Risiken; sie machen eine Aufnahme **nicht** rechtmäßig. Die
 Erkennung kann fehlschlagen (verpasster oder verspäteter Start, falsche Anwendung, weitere
 Bildschirminhalte bei Bildschirmaufnahmen, stumme Spuren). OBS Studio selbst kontaktiert beim
-Start Dienste Dritter (siehe `docs/known-limitations.md`). Prüfen Sie jede Aufnahme und ihre
-Warnungen.
+Start Dienste Dritter (siehe die Projektdokumentation, `docs/known-limitations.md` im
+Quellcode-Repository). Prüfen Sie jede Aufnahme und ihre Warnungen.
 
 ### 6. Keine Rechtsberatung
 
@@ -238,9 +240,9 @@ eigenen Lizenzen. Captation enthält OBS Studio nicht, sondern steuert es als se
 
 Vor der ersten Nutzung zeigt die Software diesen Text an und verlangt das Setzen einer Checkbox.
 Die Bestätigung (Textversion, Prüfsumme dieses Textes, Zeitpunkt, Benutzername des
-Betriebssystems und Art der Bestätigung) wird lokal im Statusverzeichnis des Benutzers
-gespeichert. Ändert sich dieser Text, ist er erneut zu bestätigen. Die Bestätigung ersetzt nicht
-die im strengen Hinweis oben genannten Zustimmungen.
+Betriebssystems, Art der Bestätigung und Version der Software) wird lokal im Statusverzeichnis
+des Benutzers gespeichert. Ändert sich dieser Text, ist er erneut zu bestätigen. Die Bestätigung
+ersetzt nicht die im strengen Hinweis oben genannten Zustimmungen.
 
 ### 10. Anwendbares Recht
 

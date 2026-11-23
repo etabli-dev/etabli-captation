@@ -1,4 +1,4 @@
-"""End-to-end scenarios E1–E13 (stage 12) on Linux. Marker ``e2e``; needs a bootstrapped OBS,
+"""End-to-end scenarios E1–E13 on Linux. Marker ``e2e``; needs a bootstrapped OBS,
 PipeWire, dbus-daemon and (for E3) v4l2loopback /dev/video42. See tests/e2e/harness.py."""
 
 from __future__ import annotations
@@ -240,7 +240,7 @@ def test_e5_idle_armed_with_obs_running_records_nothing(
 def test_e6_countdown_cancel_and_smoke(
     desk: StubDesktop, password: Secret, virtual_audio: None
 ) -> None:
-    """Also the stage 09 smoke test: cancel → second attempt records → red → disarm stops."""
+    """Also the tray smoke test: cancel → second attempt records → red → disarm stops."""
     desk.notify.sent.clear()
     with rig(desk, password) as r:
         assert r.arm()["ok"] and r.tray_status() == "Active"

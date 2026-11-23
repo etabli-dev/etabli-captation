@@ -1,4 +1,4 @@
-"""WindowsProbe logic on Linux: a dict-backed registry and fake process lists (stage 07)."""
+"""WindowsProbe logic on Linux: a dict-backed registry and fake process lists."""
 
 from __future__ import annotations
 

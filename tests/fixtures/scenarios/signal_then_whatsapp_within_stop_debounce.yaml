@@ -1,8 +1,9 @@
 name: Signal ends, WhatsApp starts within the stop debounce
 description: >-
   The Signal call ends and a WhatsApp call starts 3 s later, well within stop_debounce_s.
-  The different app_id finalises the Signal session at once and the WhatsApp call becomes a
-  second session with its own debounce and countdown.
+  A different app_id is debounced like a stop: the Signal session ends once stop_debounce_s
+  has passed since Signal left, and the WhatsApp call becomes a second session with its own
+  debounce and countdown.
 reqs: [R-09, R-10, R-17]
 apps:
   signal: {pid: 300, process_name: signal-desktop}
@@ -21,16 +22,17 @@ steps:
       - ShowReminder
     state: RECORDING
   - {t: 30, mic: [], expect: [], state: PENDING_STOP}
-  - {t: 33, mic: [whatsapp], context: whatsapp/audio, expect: ["StopSegment(1)", Teardown], state: STOPPING}
-  - {t: 34, event: segment_stopped, expect: [RunPostprocess, "SetTrayState(armed)"], state: POSTPROCESSING}
-  - {t: 35, mic: [whatsapp], expect: [], state: POSTPROCESSING}
-  - {t: 40, event: postprocess_done, expect: ["WriteSessionJson(complete)"], state: PENDING_START}
-  - {t: 41, mic: [whatsapp], expect: [], state: PENDING_START}
-  - t: 43
+  - {t: 33, mic: [whatsapp], context: whatsapp/audio, expect: [], state: PENDING_STOP}
+  - {t: 40, mic: [whatsapp], expect: ["StopSegment(1)", Teardown], state: STOPPING}
+  - {t: 41, event: segment_stopped, expect: [RunPostprocess, "SetTrayState(armed)"], state: POSTPROCESSING}
+  - {t: 42, mic: [whatsapp], expect: [], state: POSTPROCESSING}
+  - {t: 45, event: postprocess_done, expect: ["WriteSessionJson(complete)"], state: PENDING_START}
+  - {t: 46, mic: [whatsapp], expect: [], state: PENDING_START}
+  - t: 48
     mic: [whatsapp]
     expect: ["BeginSession(whatsapp)", "NotifyCountdown(whatsapp,5)"]
     state: COUNTDOWN
-  - t: 48
+  - t: 53
     mic: [whatsapp]
     expect:
       - CloseCountdown

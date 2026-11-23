@@ -2,9 +2,12 @@
 
 1. Every ``# PF-xxx`` reference in ``src/`` must exist in ``docs/platform-facts.md`` with
    status ``verified``. Exception (ADR-015): a ``pending`` fact belongs to another OS (its OS
-   column) and was prepared without that OS; it is reported but tolerated, except when the
-   check runs on that OS (``--os``, default: the current OS) or with ``--release``, where every
-   pending fact is an error. ``refuted``/``superseded`` facts may never be referenced.
+   column) and was prepared without that OS; it is reported but tolerated, except for the OS
+   the check is for (``--os``, default: the current OS), where it is an error.
+   ``--release --os X`` gates the release of OS X: X's pending facts are errors, other OSes'
+   pending facts are only listed (they ship in a later release). Plain ``--release`` (no
+   ``--os``) gates a release for every OS: every pending fact is an error.
+   ``refuted``/``superseded`` facts may never be referenced.
 2. In ``src/captation/obs/kinds.py``, ``src/captation/platform/*.py`` and the per-OS firewall
    and UI modules every string constant
    needs a PF reference on the same line. Allowed without one: docstrings, f-string parts,
@@ -102,9 +105,15 @@ def unannotated_constants(path: Path) -> list[str]:
 def check(
     root: Path = ROOT, *, os_name: str | None = None, release: bool = False
 ) -> tuple[list[str], list[str]]:
-    """(problems, pending notes)."""
+    """(problems, pending notes).
+
+    ``os_name`` is the OS whose pending facts are errors (default: the current OS).
+    ``release`` without ``os_name`` makes the pending facts of every OS errors.
+    """
     facts = known_facts(root / "docs" / "platform-facts.md")
-    here = os_name or current_os()
+    strict_os = (
+        {"linux", "macos", "windows"} if release and os_name is None else {os_name or current_os()}
+    )
     problems: list[str] = []
     pending: set[str] = set()
     for path in sorted((root / "src").rglob("*.py")):
@@ -119,7 +128,7 @@ def check(
                 status, fact_os = entry
                 if status == "verified":
                     continue
-                if status == "pending" and not release and fact_os != here:
+                if status == "pending" and fact_os not in strict_os:
                     pending.add(f"{ref} (needs {fact_os})")
                 elif status == "pending":
                     problems.append(
@@ -135,14 +144,25 @@ def check(
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--root", type=Path, default=ROOT)
-    parser.add_argument("--os", dest="os_name", choices=["linux", "macos", "windows"])
-    parser.add_argument("--release", action="store_true", help="pending facts are errors")
+    parser.add_argument(
+        "--os",
+        dest="os_name",
+        choices=["linux", "macos", "windows"],
+        help="the OS whose pending facts are errors (default: the current OS)",
+    )
+    parser.add_argument(
+        "--release",
+        action="store_true",
+        help="release gate: with --os, that OS's pending facts are errors; "
+        "without --os, every pending fact is an error",
+    )
     args = parser.parse_args(argv)
     problems, pending = check(args.root, os_name=args.os_name, release=args.release)
     for line in problems:
         print(line)
     if pending:
-        print(f"{len(pending)} pending fact(s) to verify on their OS: " + ", ".join(pending))
+        what = "not part of this release" if args.release else "to verify on their OS"
+        print(f"{len(pending)} pending fact(s) {what}: " + ", ".join(pending))
     print("facts ok" if not problems else f"{len(problems)} fact problem(s)")
     return 1 if problems else 0
 

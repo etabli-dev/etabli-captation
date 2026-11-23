@@ -17,8 +17,13 @@ def test_default_rules_validate_and_compile() -> None:
     assert ids[:3] == ["zoom", "teams", "webex"]
     assert all(p.pattern for a in rules.apps for p in a.process)
     browser = rules.app("browser")
-    assert browser is not None and len(browser.title_rules) == 7
-    assert [m.reason for m in rules.modes] == ["meeting_app", "camera_active", "default"]
+    assert browser is not None and len(browser.title_rules) >= 13
+    assert [m.reason for m in rules.modes] == [
+        "meeting_app",
+        "camera_active",
+        "browser_meeting",
+        "default",
+    ]
     assert any(p.search("obs") for p in rules.ignore_process)
     assert any(p.search("captation-probe") for p in rules.ignore_process)
 
@@ -38,9 +43,10 @@ def test_user_rules_merge_by_id(tmp_path: Path) -> None:
         "modes": [{"when": {}, "mode": "audio", "reason": "default"}],
         "ignore": {"process": ["^myrecorder$"]},
     }
+    default_ids = [a.id for a in load_rules(BUILTIN_DEFAULT).apps]
     rules = load_rules(BUILTIN_DEFAULT, _write(tmp_path / "user.yaml", user))
     ids = [a.id for a in rules.apps]
-    assert ids.index("signal") == 6  # replaced in place, order kept
+    assert ids.index("signal") == default_ids.index("signal")  # replaced in place, order kept
     assert ids[-1] == "fakecall"  # new ids are appended
     signal = rules.app("signal")
     assert signal is not None and signal.category == "call"

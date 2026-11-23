@@ -1,4 +1,4 @@
-"""``hooks.on_session_complete``: argv lists, no shell, timeout (stage 10, task 9).
+"""``hooks.on_session_complete``: argv lists, no shell, timeout.
 
 Placeholders ``{session_dir}``, ``{session_id}`` and ``{project_id}`` are replaced inside
 single argv elements, so a value with spaces stays one argument. A hook failure produces a

@@ -1,4 +1,4 @@
-"""Regression tests for the stage 14 review findings (2026-11-23)."""
+"""Regression tests for the release review findings (2026-11-23)."""
 
 from __future__ import annotations
 

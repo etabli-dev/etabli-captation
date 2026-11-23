@@ -7,6 +7,7 @@ never pickle, and limited in size. Malformed messages are rejected and logged.
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import hmac
 import json
@@ -28,6 +29,8 @@ from captation.config import APP_AUTHOR, APP_NAME, ensure_private_dir
 log = logging.getLogger(__name__)
 
 MAX_MESSAGE_BYTES = 64 * 1024
+MAX_CONNECTIONS = 16  # concurrent clients; more are closed at once (only this user can connect)
+READ_DEADLINE_S = 5.0  # a client that stalls mid-message is cut off
 AUTH_TIMEOUT_S = 2.0
 NONCE_BYTES = 32
 MESSAGE_TYPES = frozenset({"arm", "disarm", "status", "stop", "cancel"})
@@ -66,8 +69,8 @@ def pipe_address(domain: str, user: str) -> str:
     instance uses ``FILE_FLAG_FIRST_PIPE_INSTANCE``, so a process that takes the name before the
     agent starts makes the agent fail to start (``IpcError``) rather than be impersonated.
     Residual risk: such a squatter blocks the agent and can answer CLI requests with a forged
-    reply (it never learns the authkey, only an HMAC of its own nonce). If stage 07 shows this
-    matters, replace the listener with ``CreateNamedPipeW`` + an owner-only DACL via ctypes.
+    reply (it never learns the authkey, only an HMAC of its own nonce). If the Windows checks show
+    this matters, replace the listener with ``CreateNamedPipeW`` + an owner-only DACL via ctypes.
     """
     account = f"{domain}\\{user}".lower()
     digest = hashlib.sha256(account.encode("utf-8")).hexdigest()[:16]
@@ -150,6 +153,41 @@ def validate_message(msg: Any) -> dict[str, Any]:
     return msg
 
 
+class _Deadline:
+    """Shut the socket down if the exchange takes longer than ``seconds``: a partial frame
+    would otherwise block the reading thread forever. POSIX sockets only."""
+
+    def __init__(self, conn: Connection, seconds: float) -> None:
+        self._sock: socket.socket | None = None
+        self._lock = threading.Lock()
+        self._timer: threading.Timer | None = None
+        if os.name != "posix":  # pragma: no cover - Windows named pipes
+            return
+        try:
+            self._sock = socket.socket(fileno=os.dup(conn.fileno()))
+        except OSError:
+            return
+        self._timer = threading.Timer(seconds, self._cut)
+        self._timer.daemon = True
+        self._timer.start()
+
+    def _cut(self) -> None:
+        with self._lock:
+            if self._sock is not None:
+                with contextlib.suppress(OSError):
+                    self._sock.shutdown(socket.SHUT_RDWR)
+                self._sock.close()
+                self._sock = None
+
+    def cancel(self) -> None:
+        if self._timer is not None:
+            self._timer.cancel()
+        with self._lock:
+            if self._sock is not None:
+                self._sock.close()
+                self._sock = None
+
+
 class IpcServer:
     """Accepts one request per connection and answers it with ``handler``'s result."""
 
@@ -174,6 +212,7 @@ class IpcServer:
                     "running, or another process holds the name)"
                 ) from exc
         self._stop = threading.Event()
+        self._slots = threading.BoundedSemaphore(MAX_CONNECTIONS)
         self._thread = threading.Thread(target=self._serve, name="captation-ipc", daemon=True)
 
     @property
@@ -192,7 +231,19 @@ class IpcServer:
                     return
                 log.warning("ipc: accept failed")
                 continue
-            threading.Thread(target=self._handle, args=(conn,), daemon=True).start()
+            if not self._slots.acquire(blocking=False):
+                log.warning("ipc: too many connections, closing one")
+                conn.close()
+                continue
+            threading.Thread(target=self._handle_slot, args=(conn,), daemon=True).start()
+
+    def _handle_slot(self, conn: Connection) -> None:
+        guard = _Deadline(conn, READ_DEADLINE_S)
+        try:
+            self._handle(conn)
+        finally:
+            guard.cancel()
+            self._slots.release()
 
     def _handle(self, conn: Connection) -> None:
         with conn:

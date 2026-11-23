@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import threading
 import time
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from typing import Any
 
 import pytest
@@ -82,6 +82,15 @@ class Server:
         self.srv.shutdown()
 
 
+def wait_for(pred: Callable[[], bool], timeout: float = 3) -> bool:
+    end = time.monotonic() + timeout
+    while time.monotonic() < end:
+        if pred():
+            return True
+        time.sleep(0.01)
+    return pred()
+
+
 @pytest.fixture
 def server() -> Iterator[Server]:
     s = Server()
@@ -102,8 +111,9 @@ def test_handshake_requests_and_events(server: Server) -> None:
     with pytest.raises(ObsRequestError) as info:
         client.request("Fail")
     assert info.value.code == 600
-    time.sleep(0.1)
-    assert ("Echo", {"for": "GetVersion"}) in events
+    # events arrive on the reader thread; the Fail echo comes after the GetVersion echo
+    assert wait_for(lambda: ("Echo", {"for": "Fail"}) in events)
+    assert events[:2] == [("Echo", {"for": "GetVersion"}), ("Echo", {"for": "Fail"})]
     with pytest.raises(ObsError, match="no response"):
         client.request("Silent", timeout_s=0.2)
     client.close()
@@ -141,7 +151,7 @@ def test_unreachable_and_unexpected_server() -> None:
         bad.stop()
     noauth = Server(auth=False)
     try:
-        c = ObsWebSocket("::1" if False else "127.0.0.1", noauth.port, None)
+        c = ObsWebSocket("127.0.0.1", noauth.port, None)
         c.connect()
         assert c.request("GetVersion") == {"echo": None}
         c.close()

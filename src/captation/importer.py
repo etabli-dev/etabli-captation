@@ -1,4 +1,4 @@
-"""Mobile recorder import (stage 13, architecture §11).
+"""Mobile recorder import (architecture §11).
 
 Privacy rules (docs/principles.md §3.2, R-55): the original file name and the device's text metadata
 (title, artist, comment, …) never reach ``session.json``, the logs, stdout or the output file's
@@ -62,6 +62,7 @@ DEVICE_SHORT: dict[Device, str] = {
 }
 INDEX_NAME = ".import-index.json"
 STAGING_PREFIX = ".import-staging-"
+STALE_STAGING_S = 6 * 3600  # an interrupted import leaves plaintext copies behind
 MUXERS = {"wav": "wav", "flac": "flac", "mp3": "mp3", "m4a": "ipod", "opus": "opus", "ogg": "ogg"}
 APP_ID_RE = re.compile(r"^[a-z0-9_-]+$")
 CONSENT_REF_MAX = 64
@@ -573,3 +574,24 @@ def _discard(record: SessionRecord) -> None:
         func(target)
 
     shutil.rmtree(record.directory, onexc=_onexc)
+
+
+def sweep_stale_staging(data_root: Path, now: float | None = None) -> int:
+    """Remove staging folders of interrupted imports (older than ``STALE_STAGING_S``).
+
+    They hold plain copies of recordings outside any session; a running import is younger.
+    """
+    import time
+
+    limit = (time.time() if now is None else now) - STALE_STAGING_S
+    removed = 0
+    if not data_root.is_dir():
+        return 0
+    for path in data_root.glob(f"{STAGING_PREFIX}*"):
+        try:
+            if path.is_dir() and not path.is_symlink() and path.stat().st_mtime < limit:
+                shutil.rmtree(path)
+                removed += 1
+        except OSError:
+            log.warning("import: could not remove a stale staging folder")
+    return removed

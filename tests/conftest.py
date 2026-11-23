@@ -46,8 +46,12 @@ def pytest_sessionfinish(session: pytest.Session) -> None:
         if entry["outcome"] != "not run" or nodeid not in previous:
             previous[nodeid] = entry
     known = {item.nodeid for item in session.items} | set(_RESULTS)
+    collected_files = {nodeid.partition("::")[0] for nodeid in known}
     for nodeid in list(previous):
         path, _, name = nodeid.partition("::")
+        if path in collected_files and nodeid not in known:
+            del previous[nodeid]  # renamed test or parameter ID in a file collected this run
+            continue
         test_file = ROOT / path
         func = name.split("[")[0]
         if not test_file.exists() or f"def {func}(" not in test_file.read_text(encoding="utf-8"):

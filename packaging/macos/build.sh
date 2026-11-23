@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Build "Établi Captation.app" (ADR-005, stage 11): PyInstaller one-folder .app plus the Swift
+# Build "Établi Captation.app" (ADR-005): PyInstaller one-folder .app plus the Swift
 # probe in Contents/MacOS. OBS is never bundled.
 #
 # Usage (on a Mac, from anywhere):  packaging/macos/build.sh
@@ -35,17 +35,30 @@ swift build -c release --package-path probes/macos/CaptationProbe
 probe="probes/macos/CaptationProbe/.build/release/captation-probe"
 test -x "$probe"
 
-# 2. PyInstaller .app (the spec signs the embedded binaries with $MACOS_SIGN_IDENTITY or ad hoc)
+# 2. Licence gate for the macOS runtime closure (fails on GPL, AGPL or unknown licences) and the
+#    third-party notices that the spec puts into Contents/Resources
+notices="build/THIRD_PARTY_NOTICES.txt"
+uv run python tools/licence_gate.py --notices "$notices"
+
+# 3. PyInstaller .app (the spec signs the embedded binaries with $MACOS_SIGN_IDENTITY or ad hoc)
 rm -rf "$app" "dist/captation" build/pyinstaller-macos
-CAPTATION_VERSION="$version" CAPTATION_SHORT_VERSION="$short_version" \
+CAPTATION_VERSION="$version" CAPTATION_SHORT_VERSION="$short_version" CAPTATION_NOTICES="$notices" \
   uv run --group build pyinstaller --noconfirm --clean \
   --distpath dist --workpath build/pyinstaller-macos \
   packaging/macos/captation.spec
+for f in LICENSE DISCLAIMER.md THIRD_PARTY_NOTICES.txt; do
+  test -f "$app/Contents/Resources/$f" || { echo "missing $f in the app bundle" >&2; exit 1; }
+done
+# pystray (LGPL-3.0) must stay replaceable: plain source files, not inside the PYZ archive
+if [[ -z "$(find "$app/Contents" -path '*/pystray/__init__.py' -print -quit)" ]]; then
+  echo "pystray is not collected as separate source files" >&2
+  exit 1
+fi
 
-# 3. The probe lives next to the agent executable (MacProbe looks in Contents/MacOS, PF-119)
+# 4. The probe lives next to the agent executable (MacProbe looks in Contents/MacOS, PF-119)
 install -m 0755 "$probe" "$app/Contents/MacOS/captation-probe"
 
-# 4. Sign: nested code first, then the bundle (adding the probe invalidated the seal)
+# 5. Sign: nested code first, then the bundle (adding the probe invalidated the seal)
 if [[ -n "$identity" ]]; then
   sign=(codesign --force --options runtime --timestamp --sign "$identity")
   "${sign[@]}" "$app/Contents/MacOS/captation-probe"
@@ -72,7 +85,7 @@ if [[ -n "$identity" && ( -n "${MACOS_NOTARY_PROFILE:-}" || -n "${MACOS_NOTARY_A
   notary=true
 fi
 
-# 5. Notarise the app (zip submission), staple the ticket to the app
+# 6. Notarise the app (zip submission), staple the ticket to the app
 if $notary; then
   ditto -c -k --sequesterRsrc --keepParent "$app" "dist/${name}.notary.zip"
   notarise "dist/${name}.notary.zip"
@@ -81,13 +94,14 @@ if $notary; then
   signing="Developer ID (${identity}), notarised and stapled"
 fi
 
-# 6. Artefacts: zip (ditto keeps the signature and extended attributes) and dmg
+# 7. Artefacts: zip (ditto keeps the signature and extended attributes) and dmg
 rm -f "dist/${name}.zip" "dist/${name}.dmg"
 ditto -c -k --sequesterRsrc --keepParent "$app" "dist/${name}.zip"
 staging=$(mktemp -d)
 trap 'rm -rf "$staging"' EXIT
 ditto "$app" "$staging/${app_name}"
 ln -s /Applications "$staging/Applications"
+cp LICENSE DISCLAIMER.md "$notices" "$staging/"
 hdiutil create -volname "Établi Captation" -srcfolder "$staging" -ov -format UDZO "dist/${name}.dmg"
 if [[ -n "$identity" ]]; then
   codesign --force --timestamp --sign "$identity" "dist/${name}.dmg"

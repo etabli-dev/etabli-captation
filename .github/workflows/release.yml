@@ -8,7 +8,67 @@ permissions:
   contents: read
 
 jobs:
+  checks:
+    # Gate for every build: tag = package version, specs, lint, types, unit tests, traceability,
+    # licences and the Linux platform facts. Also decides which other platforms are released:
+    # a platform with pending facts (ADR-015) is skipped, not failed (ADR-016: v0.1.0 = Linux).
+    runs-on: ubuntu-latest
+    outputs:
+      macos: ${{ steps.platforms.outputs.macos }}
+      windows: ${{ steps.platforms.outputs.windows }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: astral-sh/setup-uv@1db35dd8eee11c5894872e0b383ae6c406cf738d # v10.4.0
+        with:
+          python-version: "3.12"
+      - name: Install ffmpeg, age and dbus
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg age dbus
+      - run: uv sync --locked
+      - name: Tag matches the package version
+        shell: bash
+        run: |
+          version="$(uv run python -c 'from captation.version import __version__; print(__version__)')"
+          tag="${GITHUB_REF_NAME}"
+          if [[ ! "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::tag '$tag' is not of the form vX.Y.Z"
+            exit 1
+          fi
+          if [[ "$tag" != "v${version}" ]]; then
+            echo "::error::tag '$tag' does not match captation.version.__version__ '${version}'"
+            exit 1
+          fi
+          echo "tag $tag = version $version"
+      - name: Specs in sync
+        run: uv run python tools/sync_specs.py --check
+      - run: uv run ruff check src tests tools
+      - run: uv run ruff format --check src tests tools
+      - run: uv run mypy --strict src
+      - name: Unit tests
+        run: uv run pytest -m "not obs and not e2e"
+      - name: Requirement traceability (strict)
+        run: uv run python tools/traceability.py --strict
+      - name: "Platform facts: Linux (release mode)"
+        run: uv run python tools/check_facts.py --release --os linux
+      - name: "Platform facts: macOS and Windows (decide which builds run)"
+        # The Linux check above already covers every OS-independent problem, so a failure here
+        # means pending facts of that OS: its build is skipped with a notice.
+        id: platforms
+        shell: bash
+        run: |
+          for os in macos windows; do
+            if uv run python tools/check_facts.py --release --os "$os" > "facts-$os.txt"; then
+              echo "$os=true" >> "$GITHUB_OUTPUT"
+              echo "- $os: facts verified, built in this release" >> "$GITHUB_STEP_SUMMARY"
+            else
+              count="$(grep -c "is pending for $os" "facts-$os.txt" || true)"
+              echo "$os=false" >> "$GITHUB_OUTPUT"
+              echo "::notice title=$os build skipped::$count reference(s) to pending $os facts (ADR-015); $os is not part of this release"
+              echo "- $os: skipped, $count reference(s) to pending facts" >> "$GITHUB_STEP_SUMMARY"
+            fi
+          done
+
   linux:
+    needs: checks
     runs-on: ubuntu-latest
     permissions:
       contents: write  # this job creates the draft release
@@ -18,24 +78,43 @@ jobs:
         with:
           python-version: "3.12"
       - run: uv sync --locked --group build
-      - name: "Platform facts (release mode: no pending facts allowed)"
-        run: uv run python tools/check_facts.py --release
+      - name: "Platform facts (release mode: no pending Linux facts)"
+        run: uv run python tools/check_facts.py --release --os linux
       - run: packaging/linux/build.sh
       - name: SBOM
         run: |
           uv export --no-dev --no-hashes --no-emit-project --format requirements-txt > dist/runtime-requirements.txt
           uvx --from cyclonedx-bom==9.0.0 cyclonedx-py requirements dist/runtime-requirements.txt -o dist/sbom.cdx.json
+      - name: Release notes (platforms in this release)
+        env:
+          MACOS: ${{ needs.checks.outputs.macos }}
+          WINDOWS: ${{ needs.checks.outputs.windows }}
+        run: |
+          {
+            echo "Linux: built in this release."
+            for pair in "macOS:$MACOS" "Windows:$WINDOWS"; do
+              if [ "${pair#*:}" = "true" ]; then
+                echo "${pair%%:*}: built in this release."
+              else
+                echo "${pair%%:*}: not in this release (platform facts pending verification)."
+              fi
+            done
+          } > dist/release-platforms.txt
       - uses: softprops/action-gh-release@8a0cd651e5b2365bd640854a3fa5dfc70e4875f3 # v3.0.4
         with:
           draft: true
+          body_path: dist/release-platforms.txt
+          fail_on_unmatched_files: true
           files: |
             dist/*.tar.gz
             dist/*.tar.gz.sha256
             dist/sbom.cdx.json
 
   macos:
-    # Runs after the linux job, which creates the draft release; this job adds its assets.
-    needs: linux
+    # Only when every macOS fact is verified. Runs after the linux job, which creates the draft
+    # release; this job adds its assets.
+    needs: [checks, linux]
+    if: needs.checks.outputs.macos == 'true'
     runs-on: macos-latest
     permissions:
       contents: write  # upload to the draft release
@@ -47,11 +126,19 @@ jobs:
       - uses: astral-sh/setup-uv@1db35dd8eee11c5894872e0b383ae6c406cf738d # v10.4.0
         with:
           python-version: "3.12"
+      - name: Install ffmpeg and age
+        run: brew install ffmpeg age
       - run: uv sync --locked --group build
-      - name: "Platform facts (release mode: no pending facts allowed)"
-        run: uv run python tools/check_facts.py --release
-      - name: Swift toolchain
-        run: swift --version
+      - name: "Platform facts (release mode: no pending macOS facts)"
+        run: uv run python tools/check_facts.py --release --os macos
+      - run: uv run mypy --strict src
+      - name: Unit tests (macOS)
+        run: uv run pytest -m "not obs and not e2e"
+      - name: Swift toolchain and probe tests
+        working-directory: probes/macos/CaptationProbe
+        run: |
+          swift --version
+          swift test
       - name: Import the Developer ID certificate (only when the secrets are set)
         run: |
           if [ -z "${MACOS_CERT_P12_BASE64}" ]; then
@@ -67,6 +154,7 @@ jobs:
           security import "$RUNNER_TEMP/cert.p12" -k "$keychain" -P "$MACOS_CERT_PASSWORD" -T /usr/bin/codesign
           rm -f "$RUNNER_TEMP/cert.p12"
           security set-key-partition-list -S apple-tool:,apple: -s -k "$password" "$keychain"
+          # shellcheck disable=SC2046 # one argument per existing keychain path
           security list-keychains -d user -s "$keychain" $(security list-keychains -d user | tr -d '"')
       - name: Build Établi Captation.app (zip + dmg)
         env:
@@ -80,14 +168,17 @@ jobs:
           draft: true
           append_body: true
           body_path: dist/macos-signing.txt
+          fail_on_unmatched_files: true
           files: |
             dist/*.zip
             dist/*.dmg
             dist/*.sha256
 
   windows:
-    # Runs after the linux job, which creates the draft release; this job adds its files.
-    needs: linux
+    # Only when every Windows fact is verified. Runs after the linux job, which creates the
+    # draft release; this job adds its files.
+    needs: [checks, linux]
+    if: needs.checks.outputs.windows == 'true'
     runs-on: windows-latest
     permissions:
       contents: write  # uploads to the draft release
@@ -96,15 +187,21 @@ jobs:
       - uses: astral-sh/setup-uv@1db35dd8eee11c5894872e0b383ae6c406cf738d # v10.4.0
         with:
           python-version: "3.12"
+      - name: Install ffmpeg and Inno Setup
+        run: choco install ffmpeg innosetup -y --no-progress
       - run: uv sync --locked --group build
-      - name: "Platform facts (release mode: no pending facts allowed)"
-        run: uv run python tools/check_facts.py --release
-      - name: "Build zip and installer (unsigned; Inno Setup from the runner image if present)"
+      - name: "Platform facts (release mode: no pending Windows facts)"
+        run: uv run python tools/check_facts.py --release --os windows
+      - run: uv run mypy --strict src
+      - name: Unit tests (Windows)
+        run: uv run pytest -m "not obs and not e2e"
+      - name: "Build zip and installer (unsigned; fails without Inno Setup)"
         shell: pwsh
-        run: ./packaging/windows/build.ps1 -Installer
+        run: ./packaging/windows/build.ps1 -RequireInstaller
       - uses: softprops/action-gh-release@8a0cd651e5b2365bd640854a3fa5dfc70e4875f3 # v3.0.4
         with:
           draft: true
+          fail_on_unmatched_files: true
           files: |
             dist/*.zip
             dist/*.zip.sha256

@@ -1,4 +1,4 @@
-# PyInstaller spec for "Établi Captation.app" (ADR-005, stage 11). Run via packaging/macos/build.sh,
+# PyInstaller spec for "Établi Captation.app" (ADR-005). Run via packaging/macos/build.sh,
 # which also adds the Swift probe and signs the bundle.
 #
 # Info.plist: bundle ID de.etabli.captation, LSUIElement (menu-bar only, no Dock icon).
@@ -17,11 +17,22 @@ VERSION = os.environ.get("CAPTATION_VERSION", "0.0.0")
 SHORT_VERSION = os.environ.get("CAPTATION_SHORT_VERSION", "0.0.0")
 IDENTITY = os.environ.get("MACOS_SIGN_IDENTITY") or None
 ENTITLEMENTS = os.path.join(SPECPATH, "entitlements.plist") if IDENTITY else None  # noqa: F821
+# Written by tools/licence_gate.py --notices (packaging/macos/build.sh runs it first); a relative
+# path is relative to the repository root.
+NOTICES = os.path.join(
+    ROOT, os.environ.get("CAPTATION_NOTICES") or os.path.join("build", "THIRD_PARTY_NOTICES.txt")
+)
 
 datas = (
     collect_data_files("captation")
     + collect_data_files("jsonschema_specifications")
     + copy_metadata("keyring")
+    # Licence, disclaimer and third-party notices end up in Contents/Resources.
+    + [
+        (os.path.join(ROOT, "LICENSE"), "."),
+        (os.path.join(ROOT, "DISCLAIMER.md"), "."),
+        (NOTICES, "."),
+    ]
 )
 hiddenimports = (
     collect_submodules("keyring.backends")
@@ -41,6 +52,9 @@ a = Analysis(  # noqa: F821
     pathex=[os.path.join(ROOT, "src")],
     datas=datas,
     hiddenimports=hiddenimports,
+    # pystray (LGPL-3.0) stays a separate, replaceable module (docs/licensing.md): its .py
+    # source files are collected as files next to the other bundled files, not into the PYZ.
+    module_collection_mode={"pystray": "py"},
     # tkinter stays in: `captation accept` shows the DISCLAIMER.md checkbox dialog with it (R-59).
 )
 pyz = PYZ(a.pure)  # noqa: F821

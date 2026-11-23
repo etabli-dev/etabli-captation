@@ -21,7 +21,8 @@
 7. **Nach dem Gespräch:** Die Aufnahme endet einige Sekunden nach dem Auflegen von selbst. Dann
    den Studienmodus beenden („Studienmodus beenden“ oder `captation disarm`).
 8. **Ablage prüfen:** `data_root/<Projekt>/<Sitzung>/` enthält die Spuren, `session.json` und
-   `SHA256SUMS`. Warnungen (z. B. stumme Spur) stehen in `session.json` unter `warnings`.
+   `SHA256SUMS`. Warnungen (z. B. stumme Spur) stehen in `session.json` unter `warnings`
+   (Bedeutung der Codes: `specs/architecture.md` §8).
 
 ## Mobile Aufnahmen (am iPhone geführte Anrufe)
 

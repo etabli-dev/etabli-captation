@@ -19,7 +19,7 @@ import pytest
 
 from captation import ipc
 
-pytestmark = pytest.mark.skipif(os.name != "posix", reason="AF_UNIX IPC (Windows: stage 07)")
+pytestmark = pytest.mark.skipif(os.name != "posix", reason="AF_UNIX IPC (Windows uses named pipes)")
 
 
 @pytest.fixture

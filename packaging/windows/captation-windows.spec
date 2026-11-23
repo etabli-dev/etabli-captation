@@ -37,6 +37,9 @@ a = Analysis(  # noqa: F821
     hiddenimports=hiddenimports,
     datas=datas,
     noarchive=False,
+    # pystray (LGPL-3.0) stays a separate, replaceable module (docs/licensing.md): its .py
+    # source files land in _internal\pystray\ instead of the PYZ archive.
+    module_collection_mode={"pystray": "py"},
 )
 pyz = PYZ(a.pure)  # noqa: F821
 

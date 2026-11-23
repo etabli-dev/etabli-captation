@@ -1,8 +1,9 @@
-# Runbook: macOS stage runs (03, 06, 11, 12)
+# Runbook: completing macOS support on the Mac
 
 macOS support was written and unit-tested on Linux (ADR-015). Nothing macOS-specific has run
 yet. This runbook lists, in order, what remains on the Mac: build, run, verify every pending
-fact (PF-101 … PF-128), collect the Definition-of-Done evidence and stop at the checkpoints.
+fact (PF-101 … PF-128), collect the evidence for the release checklist (§13) and stop where an
+open question (§14) needs a decision.
 
 Rules that still apply on the Mac: docs/principles.md §2–§6 (consent guard, privacy, OBS boundary,
 verify-don't-assume). A fact is set to `verified` only with the command and an output excerpt
@@ -24,8 +25,8 @@ verified (that is intended).
 
 ## 1. Prerequisites
 
-Target: **macOS 26** (owner's Mac, ADR-016); per-process mic detection (macOS ≥ 14) applies.
-
+Target: **macOS 26** as the reference system (ADR-016); per-process mic detection (macOS ≥ 14)
+applies.
 
 1. Record the machine: `sw_vers` (macOS ≥ 14 expected, ADR-006), `uname -m` (arm64/x86_64).
 2. Xcode Command Line Tools: `xcode-select --install`, then `swift --version` (Swift ≥ 5.9).
@@ -36,19 +37,16 @@ Target: **macOS 26** (owner's Mac, ADR-016); per-process mic detection (macOS �
 4. **OBS Studio 33** from the official download page (https://obsproject.com/download), `.dmg`
    → drag *OBS* into `/Applications`. Start it once by hand, finish or skip the auto-configuration
    wizard, then **quit** it (the bootstrap writes the websocket config only while OBS is closed).
-5. Hardware for stage 12: a headset, the built-in or a USB camera, the RØDECaster Duo, an iPhone
-   signed in with the same Apple ID (for *Calls from iPhone*), a second device on the same LAN
-   (for the firewall test).
+5. Hardware for the end-to-end checks: a headset, the built-in or a USB camera, an external
+   audio interface if one is used, an iPhone signed in with the same Apple ID (for *Calls from
+   iPhone*), a second device on the same LAN (for the firewall test).
 
-## 2. Repository and local notes
+## 2. Repository
 
 ```sh
 mkdir -p ~/src && cd ~/src
 gh repo clone etabli-dev/etabli-captation && cd etabli-captation
 ```
-
-If you keep local, untracked build notes (build state, stage reports) on the Linux machine,
-copy them into the repository root over a private channel; they are git-ignored.
 
 ## 3. Build the probe
 
@@ -79,7 +77,19 @@ uv run python tools/check_facts.py                 # fails until PF-1xx are veri
 
 `test_real_helper_once` needs step 3 done; `test_real_fdesetup_and_locator` needs OBS installed.
 
-## 5. Shared code: state after the Linux merge (2026-11-23)
+**Disclaimer and configuration (before the OBS setup).** Accept the disclaimer first (the gate
+itself is checked in §11), then create the user configuration. On macOS the config file is
+`~/Library/Application Support/captation/config.yaml` (platformdirs `user_config_dir`):
+
+```sh
+uv run captation accept                     # dialog with checkbox; details in §11
+mkdir -p ~/Library/Application\ Support/captation
+cp config/config.example.yaml ~/Library/Application\ Support/captation/config.yaml
+# edit: data_root on a FileVault-encrypted volume (PF-120/121), project_id
+uv run captation check-config               # ok <digest>
+```
+
+## 5. Shared code prepared on Linux
 
 Done on Linux (verify behaviour on the Mac, the code paths are generic):
 
@@ -101,7 +111,9 @@ Done on Linux (verify behaviour on the Mac, the code paths are generic):
 Still open on the Mac: wire `MacProbe(obs_capturing=…)` only if the low-confidence path is used
 (macOS < 14, PF-114); `doctor` check for the probe helper's path and signature.
 
-## 6. Stage 03 on macOS: bootstrap, facts, firewall ⛳ (checkpoint only if something deviates)
+## 6. OBS setup and platform facts: bootstrap, facts, firewall
+
+If a result deviates from Linux in a way that changes a code path, stop and add it to §14.
 
 ```sh
 ls ~/Library/Application\ Support/obs-studio > /tmp/obs-before.txt          # PF-102
@@ -117,8 +129,8 @@ uv run captation obs facts --out docs/platform-facts.md
   state after run 2 (logs and window geometry may differ; profiles, scenes and websocket config
   must not).
 - Show non-Captation profiles and collections unchanged (listing before and after).
-- Password hygiene (DoD 6), without putting the password on a command line:
-  `security find-generic-password -s etabli-captation -a obs-websocket -w > /tmp/pw && git grep -n -F -f /tmp/pw; grep -rF -f /tmp/pw ~/Library/Logs/captation reports; rm -f /tmp/pw`
+- Password hygiene, without putting the password on a command line:
+  `security find-generic-password -s etabli-captation -a obs-websocket -w > /tmp/pw && git grep -n -F -f /tmp/pw; grep -rF -f /tmp/pw ~/Library/Logs/captation; rm -f /tmp/pw`
   → no match; `ps -axww -o args | grep -i password` → nothing.
 - 10 s test recordings in `Captation-Audio` and `Captation-Video` (`ffprobe` excerpt; PF-112).
 - Mic release (ADR-010, PF-112): `captation-probe --once` with OBS idle → OBS absent; create
@@ -141,20 +153,20 @@ nc -vz -w 3 <mac-lan-ip> 4455                       # from a second LAN device: 
 uv run captation obs firewall --apply               # re-apply is idempotent
 sudo reboot                                         # then: -sr shows the rules again, --check ok
 uv run captation obs firewall --remove              # files, token, rules gone
-uv run captation obs firewall --check               # not ok again → re-apply for the next stages
+uv run captation obs firewall --check               # not ok again → re-apply for the next steps
 ```
 
 Also check whether `launchctl print system/de.etabli.captation.pf` works **without** sudo; if it
 does, `--check` can additionally require the job (record it in `docs/decisions.md`).
 
-## 7. Stage 06 on macOS: detection
+## 7. Detection on macOS
 
-1. Probe DoD 1: `captation-probe --once` → valid JSON with `confidence:"high"` (or `low` with the
+1. Probe: `captation-probe --once` → valid JSON with `confidence:"high"` (or `low` with the
    reason documented).
 2. `uv run captation doctor --probe` streams snapshots. Run a Signal or WhatsApp call and a
    *Calls from iPhone* call: each appears within 2 polls and disappears within 2 polls after
-   hang-up (DoD 2). OBS idle and running is never a mic user (DoD 3).
-3. Per-app audio isolation (DoD 4, PF-108): during a recorded call, play a test tone from another
+   hang-up. OBS idle and running is never a mic user.
+3. Per-app audio isolation (PF-108): during a recorded call, play a test tone from another
    app (`afplay /System/Library/Sounds/Ping.aiff` in a loop, or `ffplay -f lavfi sine=440`);
    extract the remote track and show it does not contain the tone:
    `ffmpeg -i segNN_container.mkv -map 0:a:1 -af astats -f null - 2>&1 | grep -E 'RMS level|Peak level'`
@@ -174,7 +186,7 @@ For each row: run the command, compare with the expected value, then edit the ro
 excerpt, set the date. If the value differs: set the row to `refuted` with a pointer, add a new
 PF-1xx row with the correct value, change the code (and the `# PF-1xx` comment) and re-run the
 tests. Finally `uv run python tools/check_facts.py` (on the Mac) and
-`uv run python tools/check_facts.py --release` must both print `facts ok`.
+`uv run python tools/check_facts.py --release --os macos` must both print `facts ok`.
 
 | PF | What | Command on the Mac | Expected |
 |---|---|---|---|
@@ -232,15 +244,17 @@ click-by-click section of `docs/known-limitations.md`:
    detection by title). Without it, browsers holding the mic stay category `browser`.
 4. The probe and the agent must **not** trigger Microphone or Camera prompts. If a prompt names
    *Établi Captation* or *Terminal* for the microphone, OBS was not started through
-   LaunchServices (PF-103): stop and report.
+   LaunchServices (PF-103): stop and add it to §14.
 5. macOS 15: note whether a periodic re-confirmation of Screen Recording for OBS appears (L-03)
    and after how long.
 
-## 11. Stage 11 on macOS: autostart, doctor, package
+## 11. Disclaimer gate, autostart, doctor, packaging
 
-**Disclaimer gate first (R-59, ADR-017).** `uv run captation arm` must be refused with
-`terms_not_accepted` before acceptance. Then `uv run captation accept`: the Tk dialog opens in
-front, the checkbox stays disabled until the text is scrolled to the end, *Akzeptieren* is
+**Disclaimer gate first (R-59, ADR-017).** Withdraw the acceptance from §4
+(`uv run captation accept --revoke`); with the agent running (`uv run captation run`),
+`uv run captation arm` must be refused with `terms_not_accepted`. Then `uv run captation accept`:
+the Tk dialog opens in front, the checkbox stays disabled until the text is scrolled to the end,
+*Akzeptieren* is
 disabled until the box is ticked; *Ablehnen* leaves `captation accept --status` at exit 2. After
 accepting, `--status` shows the version and `doctor` reports `terms` as ok. Repeat once with the
 packaged app (`dist/…/captation accept`) to confirm Tk is bundled.
@@ -251,15 +265,15 @@ uv run captation install-autostart                     # idempotent: no change, 
 plutil -lint ~/Library/LaunchAgents/de.etabli.captation.plist
 launchctl print gui/$(id -u)/de.etabli.captation | grep -E 'state|pid'
 # log out and in (or reboot), then:
-uv run captation status                                # running, DISARMED (DoD 1)
+uv run captation status                                # running, DISARMED
 ls ~/Library/LaunchAgents ~/Library/Logs/captation > /tmp/before.txt
 uv run captation uninstall-autostart
 ls ~/Library/LaunchAgents ~/Library/Logs/captation > /tmp/after.txt; diff /tmp/before.txt /tmp/after.txt
-uv run captation doctor                                # DoD 3: ok or explained warnings
+uv run captation doctor                                # ok or explained warnings
 packaging/macos/build.sh                               # ad-hoc signed .app, zip, dmg
 ```
 
-Packaged build (DoD 4): open the dmg, drag *Établi Captation* to `/Applications`, first start
+Packaged build: open the dmg, drag *Établi Captation* to `/Applications`, first start
 via right-click → *Open* (ad-hoc build), then:
 
 ```sh
@@ -276,7 +290,7 @@ notification with *Abbrechen*, and the start reminder. With a Developer ID certi
 **without** `com.apple.security.cs.allow-unsigned-executable-memory` in
 `packaging/macos/entitlements.plist`; remove the key if it is not needed.
 
-## 12. Stage 12 on macOS: E2E and real apps ⛳ (checkpoint)
+## 12. End-to-end checks and real apps
 
 The e2e harness (`tests/e2e/`) is Linux-only today (`pw-cat`, `pw-loopback`, v4l2loopback, a
 D-Bus stub). A macOS variant needs, per scenario:
@@ -287,7 +301,7 @@ D-Bus stub). A macOS variant needs, per scenario:
   see §5 item 5) and isolation is checked in the real-app rows instead. The first run asks for
   the microphone permission of the terminal app: allow it;
 - test microphone: BlackHole 2ch (`brew install blackhole-2ch`) as a virtual input fed with a
-  1320 Hz tone, or the RØDECaster;
+  1320 Hz tone, or an external audio interface;
 - camera (E3): the real camera (open Photo Booth after 10 s), else skip with the reason;
 - network per process (E10): `nettop -P -L 1 -p <pid>` or `lsof -nP -i -a -p <pid>` for the
   agent, the probe and OBS; expected: the agent only `127.0.0.1:4455`, the probe none, OBS none
@@ -299,48 +313,57 @@ D-Bus stub). A macOS variant needs, per scenario:
 E4, E5, E9, E10, E12 and E13 can never be skipped. Record start latency, the audio → video gap,
 CPU and RAM (idle-armed, recording audio, recording video) with `top -l` or Activity Monitor.
 
-### Real-app checklist (macOS) → `reports/E2E-macos.md`
+### Real-app checklist (macOS; record the results in the release notes)
 
 | App / path | Detected app ID | Mode | Start latency | Remote isolation (no system sounds) | Echo on local track (headset / speakers) | Issues |
 |---|---|---|---|---|---|---|
 | Zoom desktop meeting (video) | | | | | | |
-| Teams meeting (video) | | | | | | |
-| Meet or Jitsi in a browser (Chrome and Safari) | | | | | | |
-| Signal Desktop voice → video | | | | | | |
-| WhatsApp Desktop voice call | | | | | | |
-| iPhone call via *Calls from iPhone* | | | | | | |
-| RØDECaster Duo as audio device / external input | | | | | | |
+| Teams meeting (video): main app or `com.microsoft.teams2.helper`? | | | | | | |
+| Webex App meeting: `Cisco-Systems.Spark` or a helper? | | | | | | |
+| Meet, Teams web, BigBlueButton, Cisco Meeting Server web app in Chrome (titles need Screen Recording) | | | | | | |
+| The same in Safari: does CoreAudio report `com.apple.WebKit.GPU`? | | | | | | |
+| FaceTime audio and video call: only `com.apple.avconferenced`? | | | | | | |
+| iPhone call via Continuity / the Phone app (macOS 26) | | | | | | |
+| Signal Desktop voice → video (main app or `.helper`?) | | | | | | |
+| WhatsApp (`net.whatsapp.WhatsApp`) voice call | | | | | | |
+| Discord / Slack huddle (helper bundle IDs) | | | | | | |
+| A softphone if used (Zoiper, Linphone, Bria, Telephone) | | | | | | |
+| An app without a rule (recorded as `unknown`) | | | | | | |
+| External audio interface (if used) as audio device / external input | | | | | | |
+
+The expected identifiers per app are in `docs/app-coverage.md`.
 
 For each row also note the process name and bundle ID from `doctor --probe` (PF-128) and the
 OBS app-audio target that was used. All `verify: true` rules relevant for macOS must be
-confirmed or corrected before the checkpoint.
+confirmed or corrected before the macOS release.
 
-## 13. Definition of Done items that remain on the Mac
+## 13. Release checklist for macOS
 
-| Stage | DoD item | Evidence |
+| Area | Check | Evidence |
 |---|---|---|
-| 03 | 1 bootstrap succeeds and is idempotent | §6 command output + `diff -r` excerpt |
-| 03 | 2 macOS facts section written | `git diff docs/platform-facts.md` (facts block `facts:macos`) |
-| 03 | 3 10 s test recordings per profile | `ffprobe` excerpts |
-| 03 | 4 ADR-009/ADR-010 measured on macOS | PF-112 row + ADR notes |
-| 03 | 5 non-Captation profiles untouched | listings before/after |
-| 03 | 6 password not in repo, logs, process list | `git grep`, log grep, `ps` (empty) |
-| 03 | 7 `firewall --check` passes; crash upload off | `--check` output; PF-106 key value |
-| 06 | 1 probe JSON high (or low with reason) | `--once` output |
-| 06 | 2 live calls appear/disappear within 2 polls | `doctor --probe` excerpt with timestamps |
-| 06 | 3 OBS never a mic user | `doctor --probe` with OBS idle |
-| 06 | 4 per-app audio isolation | `astats` excerpt |
-| 06 | 5 rules corrected, TCC flow documented, tests green | rules diff, known-limitations diff, `pytest`/`swift test` |
-| 11 | 1 disarmed after login | `captation status` after re-login |
-| 11 | 2 autostart idempotent, no residue | listings before/after |
-| 11 | 3 `doctor` ok or explained warnings | `doctor` output |
-| 11 | 4 packaged build: tray, `status` | screenshots optional, `status` output |
-| 12 | 1–5 E1–E13, real-app checklist, no `verify: true`, full suite, traceability | `reports/E2E-macos.md`, `uv run python tools/traceability.py` |
+| OBS setup | bootstrap succeeds and is idempotent | §6 command output + `diff -r` excerpt |
+| OBS setup | macOS facts section written | `git diff docs/platform-facts.md` (facts block `facts:macos`) |
+| OBS setup | 10 s test recordings per profile | `ffprobe` excerpts |
+| OBS setup | ADR-009/ADR-010 measured on macOS | PF-112 row + ADR notes |
+| OBS setup | non-Captation profiles untouched | listings before/after |
+| OBS setup | password not in repo, logs, process list | `git grep`, log grep, `ps` (empty) |
+| OBS setup | `firewall --check` passes; crash upload off | `--check` output; PF-106 key value |
+| Detection | probe JSON high (or low with reason) | `--once` output |
+| Detection | live calls appear/disappear within 2 polls | `doctor --probe` excerpt with timestamps |
+| Detection | OBS never a mic user | `doctor --probe` with OBS idle |
+| Detection | per-app audio isolation | `astats` excerpt |
+| Detection | rules corrected, TCC flow documented, tests green | rules diff, known-limitations diff, `pytest`/`swift test` |
+| Packaging | disarmed after login | `captation status` after re-login |
+| Packaging | autostart idempotent, no residue | listings before/after |
+| Packaging | `doctor` ok or explained warnings | `doctor` output |
+| Packaging | packaged build: tray, `status` | screenshots optional, `status` output |
+| End-to-end | E1–E13, real-app checklist, no `verify: true`, full suite, traceability | real-app checklist in the release notes, `uv run python tools/traceability.py` |
 
-Each stage ends with `reports/STAGE-NN.md` (macOS run), an updated `STATE.md` and one commit
-(`stage NN (macOS): <title>`), per docs/principles.md §7.
+Record verified facts in `docs/platform-facts.md` (§8) and the checks, metrics and the real-app
+checklist in the release notes; commit the verified facts together with any code fixes
+(docs/principles.md §7).
 
-## 14. Checkpoint questions for the owner
+## 14. Open questions for the maintainer
 
 1. Which macOS version and Mac model is the reference (ADR-006 minimum stays macOS 14)?
 2. Is the TCC flow acceptable (OBS: Microphone + Screen & System Audio Recording; agent: no
@@ -355,6 +378,7 @@ Each stage ends with `reports/STAGE-NN.md` (macOS run), an updated `STATE.md` an
 6. Distribution: ad-hoc signed builds only, or set up a Developer ID certificate and notarisation
    secrets (`MACOS_CERT_P12_BASE64`, `MACOS_CERT_PASSWORD`, `MACOS_SIGN_IDENTITY`,
    `MACOS_NOTARY_APPLE_ID`, `MACOS_NOTARY_TEAM_ID`, `MACOS_NOTARY_PASSWORD`)? `SMAppService`
-   (ADR-011) instead of a LaunchAgent plist once the app is signed?
+   instead of a LaunchAgent plist once the app is signed? (This would change the autostart
+   prepared under ADR-015 and the packaging under ADR-005; record the outcome as a new ADR.)
 7. Any fact refuted on the Mac that changes a decision (e.g. ScreenCaptureKit audio of browser
    helpers not captured by bundle ID → desktop fallback for browser meetings)?

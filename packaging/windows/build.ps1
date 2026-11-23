@@ -1,16 +1,21 @@
 # Build the Windows one-folder bundle and zip (ADR-005). OBS Studio is never bundled.
 #
 # Usage (Windows PowerShell 5.1 or PowerShell 7, from any directory):
-#   powershell -ExecutionPolicy Bypass -File packaging\windows\build.ps1 [-Installer]
+#   powershell -ExecutionPolicy Bypass -File packaging\windows\build.ps1 [-Installer] [-RequireInstaller]
 # Output:
 #   dist\captation\                                       captation.exe + captationw.exe + _internal
+#                                                          + LICENSE, DISCLAIMER.md, THIRD_PARTY_NOTICES.txt
 #   dist\etabli-captation-<version>-windows-x86_64.zip    (+ .zip.sha256)
 #   with -Installer and Inno Setup 6.3+ (ISCC.exe):
 #   dist\etabli-captation-<version>-windows-x86_64-setup.exe (+ .exe.sha256)
+#   -Installer alone skips the installer with a warning when ISCC.exe is missing;
+#   -RequireInstaller (implies -Installer, used by the release workflow) fails instead.
 # The builds are unsigned: SmartScreen warns on first start (docs/runbook-windows.md).
 param(
-    [switch]$Installer
+    [switch]$Installer,
+    [switch]$RequireInstaller
 )
+if ($RequireInstaller) { $Installer = $true }
 $ErrorActionPreference = 'Stop'
 Set-Location (Resolve-Path (Join-Path $PSScriptRoot '..\..'))
 
@@ -37,6 +42,13 @@ foreach ($dir in 'build\pyinstaller', 'build\zip', 'dist\captation') {
     if (Test-Path $dir) { Remove-Item -Recurse -Force $dir }
 }
 
+# Licence gate for the Windows runtime closure (fails on GPL, AGPL or unknown licences) and the
+# third-party notices shipped in the bundle.
+$notices = 'build\THIRD_PARTY_NOTICES.txt'
+Invoke-Checked 'licence gate' {
+    uv run python tools/licence_gate.py --notices $notices
+}
+
 Invoke-Checked 'pyinstaller' {
     uv run --group build pyinstaller --noconfirm --clean `
         --distpath dist --workpath build\pyinstaller `
@@ -45,8 +57,13 @@ Invoke-Checked 'pyinstaller' {
 foreach ($exe in 'captation.exe', 'captationw.exe') {
     if (-not (Test-Path "dist\captation\$exe")) { throw "missing dist\captation\$exe" }
 }
+# pystray (LGPL-3.0) must stay replaceable: plain source files, not inside the PYZ archive.
+$pystray = Get-ChildItem -Recurse -File -Filter '__init__.py' dist\captation |
+    Where-Object { $_.Directory.Name -eq 'pystray' } | Select-Object -First 1
+if (-not $pystray) { throw 'pystray is not collected as separate source files' }
 Copy-Item LICENSE dist\captation\
 Copy-Item DISCLAIMER.md dist\captation\
+Copy-Item $notices dist\captation\
 
 # Zip with a top-level folder named like the archive.
 $stage = "build\zip\$name"
@@ -68,7 +85,9 @@ if ($Installer) {
         )
         $iscc = $candidates | Where-Object { Test-Path $_ } | Select-Object -First 1
     }
-    if (-not $iscc) {
+    if (-not $iscc -and $RequireInstaller) {
+        throw 'Inno Setup (ISCC.exe) not found, but -RequireInstaller was given'
+    } elseif (-not $iscc) {
         Write-Warning 'Inno Setup (ISCC.exe) not found: installer skipped, the zip is complete.'
     } else {
         $source = (Resolve-Path dist\captation).Path

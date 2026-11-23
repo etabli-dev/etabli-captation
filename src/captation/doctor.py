@@ -1,4 +1,4 @@
-"""``captation doctor``: installation and health checks (stage 11).
+"""``captation doctor``: installation and health checks.
 
 Each check yields ok / warn / error with a one-line fix. Exit code: 0 all ok, 1 warnings,
 2 errors.
@@ -200,7 +200,14 @@ def run_checks(cfg: Config, *, ui_probe: bool = True) -> list[Check]:
                 )
             )
     else:
-        add(Check("obs.websocket", "warn", "OBS is not running (it is started when arming)"))
+        add(
+            Check(
+                "obs.websocket",
+                "warn",
+                "OBS is not running (it is started when arming)",
+                "nothing to do; to check the connection now, start OBS and run doctor again",
+            )
+        )
 
     # exposure policy
     fw = firewall.check(cfg.obs.websocket.port)
@@ -368,7 +375,7 @@ def run_checks(cfg: Config, *, ui_probe: bool = True) -> list[Check]:
             "rules",
             "warn" if unverified else "ok",
             f"verify:true for {', '.join(unverified)}" if unverified else "all rules verified",
-            "confirm with the real-app checklist (stage 12)",
+            "confirm with the real-app checklist (docs/app-coverage.md)",
         )
     )
     return checks

@@ -1,12 +1,19 @@
 # Établi Captation: default detection and mode rules (schema: specs/rules.schema.json)
 #
 # - Regexes are Python `re` syntax. Single-quote them in YAML so backslashes stay literal.
-# - `process` matches the process basename, `bundle_id` the macOS bundle ID and `package`
-#   the Windows package family name.
-# - Entries with `verify: true` are best guesses. They MUST be confirmed or corrected on the
-#   real OS (stages 05–07) and logged in docs/platform-facts.md before stage 12 can pass.
-# - Users can extend or override these rules via detection.user_rules_file
-#   (same schema, merged by app id).
+# - `process` matches the process basename (also the exe basename and the parent app of a
+#   browser/Electron helper), `bundle_id` the macOS bundle ID, and `package` the Windows package
+#   family name or the Linux Flatpak app ID (PipeWire `pipewire.access.portal.app_id`).
+# - Title rules see window titles after normalisation: invisible characters removed, no-break
+#   spaces turned into spaces, and the browser's own suffix (" - Google Chrome", " — Mozilla
+#   Firefox", …) cut off. On Linux, Firefox-family browsers report the tab title of the capturing
+#   tab (PipeWire `media.name`, PF-026); other browsers report no titles under Wayland.
+# - Entries with `verify: true` rest on documentation or research only for at least one OS. They
+#   are confirmed on the real OS (docs/app-coverage.md lists which OS and what to check) and the
+#   result is recorded in docs/platform-facts.md.
+# - Users extend or override these rules with detection.user_rules_file (same schema, merged by
+#   app id) and add their own meeting-page titles with detection.extra_meeting_titles.
+# - App coverage per OS, native and in the browser: docs/app-coverage.md.
 
 version: 1
 
@@ -17,53 +24,120 @@ apps:
     match:
       process: ['(?i)^zoom(\.us)?(\.exe)?$']
       bundle_id: ['^us\.zoom\.xos$']
+      package: ['^us\.zoom\.Zoom$']
+    verify: true
+    note: Linux binary `zoom` (deb and Flatpak), macOS `zoom.us`, Windows `Zoom.exe` (its folder moves between updates, so only the basename is matched).
 
   - id: teams
     category: meeting
     match:
-      process: ['(?i)^ms-?teams(\.exe)?$', '(?i)^microsoft teams']
-      bundle_id: ['^com\.microsoft\.teams2?$']
-      package: ['(?i)^MSTeams_']
+      process: ['(?i)^ms-teams(\.exe)?$', '(?i)^msteams$', '(?i)^teams-for-linux$']
+      bundle_id: ['^com\.microsoft\.teams2(\.helper.*)?$']
+      package: ['(?i)^MSTeams_', '^com\.github\.IsmaelMartinez\.teams_for_linux$']
     verify: true
+    note: >-
+      New Teams (Windows package MSTeams_8wekyb3d8bbwe, macOS com.microsoft.teams2). Linux has no
+      official client: teams-for-linux (Electron, also Flatpak) or the web app in a browser.
 
   - id: webex
     category: meeting
     match:
-      process: ['(?i)webex', '(?i)^ciscocollabhost(\.exe)?$', '(?i)^atmgr(\.exe)?$']
-      bundle_id: ['(?i)^cisco-systems\.spark$']
+      process: ['(?i)^(webex|webexhost|ciscocollabhost|ciscocollabhostcef|atmgr)(\.exe)?$']
+      bundle_id: ['(?i)^cisco-systems\.spark$', '^com\.webex\.meetingmanager$']
     verify: true
+    note: Webex App (CiscoCollabHost, webexhost for meetings) and the classic Webex Meetings client (atmgr, com.webex.meetingmanager).
 
   - id: jitsi
     category: meeting
     match:
       process: ['(?i)^jitsi[ -]?meet(\.exe)?$']
+      bundle_id: ['^org\.jitsi\.jitsi-meet$']
+      package: ['^org\.jitsi\.jitsi-meet$']
     verify: true
 
-  # ---------- phone calls relayed to the Mac (Continuity) → audio ----------
-  - id: phone_relay
+  - id: goto
+    category: meeting
+    match:
+      process: ['(?i)^(goto|g2mcomm)(\.exe)?$']
+      bundle_id: ['(?i)^com\.logmein\.gotomeeting$']
+    verify: true
+
+  # ---------- calls → audio, video if the camera is on ----------
+  - id: apple_call
     category: call
     match:
-      process: ['(?i)^(facetime|phone|avconferenced|callservicesd)$']
-      bundle_id: ['^com\.apple\.(FaceTime|mobilephone)$']
+      process: ['^avconferenced$']
+      bundle_id: ['^com\.apple\.avconferenced$', '^com\.apple\.(FaceTime|mobilephone)$']
     verify: true
     note: >-
-      Determine empirically which process holds the mic during an iPhone call on the Mac
-      (macOS version-dependent). Keep only the confirmed patterns.
+      macOS: FaceTime calls and iPhone calls taken on the Mac (Continuity, or the Phone app from
+      macOS 26) run the microphone in avconferenced once the call is connected. A FaceTime video
+      call turns the camera on and is therefore recorded as video.
 
-  # ---------- messengers → audio, video if camera on ----------
+  - id: cisco_jabber
+    category: call
+    match:
+      process: ['(?i)^ciscojabber(\.exe)?$', '(?i)^cisco jabber$']
+      bundle_id: ['^com\.cisco\.Jabber$']
+    verify: true
+
+  - id: phone_link
+    category: call
+    match:
+      process: ['(?i)^(phoneexperiencehost|yourphone)(\.exe)?$']
+      package: ['(?i)^Microsoft\.YourPhone_']
+    verify: true
+    note: >-
+      Windows Phone Link (calls from an iPhone or Android phone over Bluetooth). Which process
+      holds the microphone during a call is not documented; confirm on Windows.
+
+  - id: softphone
+    category: call
+    match:
+      process:
+        - '(?i)^zoiper5?(\.exe)?$'
+        - '(?i)^linphone(\.exe)?$'
+        - '(?i)^microsip(\.exe)?$'
+        - '(?i)^bria(\.exe)?$'
+        - '(?i)^3cx(softphone|desktopapp)(\.exe)?$'
+        - '(?i)^gnome-calls$'
+        - '(?i)^baresip$'
+        - '(?i)^twinkle$'
+        - '(?i)^jami$'
+      bundle_id:
+        - '(?i)^com\.securax\.zoiper5$'
+        - '^com\.belledonnecommunications\.linphone$'
+        - '(?i)^com\.counterpath_corporation\.bria'
+        - '^com\.tlphn\.Telephone$'
+        - '^com\.sipgate\.desktop$'
+        - '^net\.jami\.Jami$'
+      package: ['(?i)^3CXDMCC\.3CX_', '^org\.gnome\.Calls$', '^net\.jami\.Jami$']
+    verify: true
+    note: SIP/VoIP softphones (Zoiper, Linphone, MicroSIP, Bria, 3CX, GNOME Calls, baresip, Twinkle, Jami, Telephone, sipgate).
+
+  # ---------- messengers → audio, video if the camera is on ----------
   - id: whatsapp
     category: messenger
     match:
       process: ['(?i)^whatsapp(\.root)?(\.exe)?$']
-      bundle_id: ['^net\.whatsapp\.WhatsApp$']
-      package: ['(?i)^5319275A\.WhatsAppDesktop_']
+      bundle_id: ['^net\.whatsapp\.WhatsApp$', '^desktop\.WhatsApp$']
+      package:
+        - '(?i)^5319275A\.WhatsAppDesktop_'
+        - '^com\.rtosta\.zapzap$'
+        - '^io\.github\.tobagin\.karere$'
+        - '^com\.ktechpit\.whatsie$'
     verify: true
+    note: >-
+      macOS (net.whatsapp.WhatsApp) and Windows (package 5319275A.WhatsAppDesktop) apps. Linux has
+      no official app: ZapZap, Karere and Whatsie are matched by their Flatpak app ID; WhatsApp Web
+      in a browser is matched by title where titles are available.
 
   - id: signal
     category: messenger
     match:
-      process: ['(?i)^signal(-desktop)?(\.exe)?$']
-      bundle_id: ['^org\.whispersystems\.signal-desktop$']
+      process: ['(?i)^signal(-desktop)?(-beta)?(\.exe)?$']
+      bundle_id: ['^org\.whispersystems\.signal-desktop(-beta)?(\.helper.*)?$']
+      package: ['^org\.signal\.Signal$']
     verify: true
 
   - id: telegram
@@ -71,29 +145,82 @@ apps:
     match:
       process: ['(?i)^telegram(-desktop)?(\.exe)?$']
       bundle_id: ['^(ru\.keepcoder\.Telegram|com\.tdesktop\.Telegram)$']
+      package: ['^org\.telegram\.desktop$']
+
+  - id: discord
+    category: messenger
+    match:
+      process: ['(?i)^discord(ptb|canary)?(\.exe)?$', '(?i)^vesktop(\.exe)?$']
+      bundle_id: ['^com\.hnc\.Discord(PTB|Canary)?(\.helper.*)?$']
+      package: ['^com\.discordapp\.Discord$', '^dev\.vencord\.Vesktop$']
+    verify: true
+
+  - id: slack
+    category: messenger
+    match:
+      process: ['(?i)^slack(\.exe)?$']
+      bundle_id: ['^com\.tinyspeck\.slackmacgap(\.helper.*)?$']
+      package: ['(?i)^com\.tinyspeck\.slackdesktop_', '^com\.slack\.Slack$']
+    verify: true
+
+  - id: element
+    category: messenger
+    match:
+      process: ['(?i)^element(-desktop)?(\.exe)?$']
+      bundle_id: ['^im\.riot\.app(\.helper.*)?$']
+      package: ['^im\.riot\.Riot$']
     verify: true
 
   # ---------- browsers → classified by window title where available ----------
   - id: browser
     category: browser
     match:
-      process: ['(?i)^(google chrome|chrome|chromium(-browser)?|firefox(-bin)?|safari|msedge|microsoft edge|brave( browser)?)(\.exe)?$']
-      bundle_id: ['^(com\.google\.Chrome|org\.chromium\.Chromium|org\.mozilla\.firefox|com\.apple\.Safari|com\.microsoft\.edgemac|com\.brave\.Browser)(\.helper.*)?$']
+      process:
+        - '(?i)^(google[ -]chrome|chrome|chromium(-browser)?)(\.exe)?$'
+        - '(?i)^(msedge|microsoft edge)(\.exe)?$'
+        - '(?i)^(firefox(-bin|-esr)?|librewolf|zen(-bin)?|floorp|waterfox)(\.exe)?$'
+        - '(?i)^(brave( browser)?|vivaldi(-bin)?|opera|arc)(\.exe)?$'
+        - '(?i)^(safari|epiphany|webkitwebprocess)$'
+      bundle_id:
+        - '(?i)^com\.google\.Chrome(\.(beta|dev|canary))?(\.helper.*)?$'
+        - '(?i)^org\.chromium\.Chromium(\.helper.*)?$'
+        - '(?i)^com\.microsoft\.edgemac(\.(beta|dev|canary))?(\.helper.*)?$'
+        - '(?i)^org\.mozilla\.(firefox|firefoxdeveloperedition|nightly)$'
+        - '(?i)^com\.brave\.Browser(\.(beta|nightly|origin))?(\.helper.*)?$'
+        - '(?i)^com\.vivaldi\.Vivaldi(\.snapshot)?(\.helper.*)?$'
+        - '(?i)^com\.operasoftware\.Opera(GX|Next|Developer)?(\.helper.*)?$'
+        - '(?i)^company\.thebrowser\.Browser(\.helper.*)?$'
+        - '(?i)^(net\.librewolf\.librewolf|app\.zen-browser\.zen)$'
+        - '^com\.apple\.(Safari|SafariTechnologyPreview)$'
+        - '^com\.apple\.WebKit\.GPU$'
+      package:
+        - '^Mozilla\.Firefox_'
+        - '^TheBrowserCompany\.Arc_'
+        - '^(com\.google\.Chrome|org\.chromium\.Chromium|com\.microsoft\.Edge|org\.mozilla\.firefox|com\.brave\.Browser|com\.vivaldi\.Vivaldi|com\.opera\.Opera|io\.gitlab\.librewolf-community|app\.zen_browser\.zen)$'
     title_rules:
-      - { pattern: '(?i)(google meet|meet\.google\.com|^meet\s[-–])', category: meeting, app_id: google_meet }
-      - { pattern: '(?i)jitsi', category: meeting, app_id: jitsi_web }
-      - { pattern: '(?i)bigbluebutton', category: meeting, app_id: bbb }
-      - { pattern: '(?i)microsoft teams', category: meeting, app_id: teams_web }
-      - { pattern: '(?i)zoom', category: meeting, app_id: zoom_web }
-      - { pattern: '(?i)webex', category: meeting, app_id: webex_web }
-      - { pattern: '(?i)whatsapp', category: messenger, app_id: whatsapp_web }
+      - { pattern: '^Cisco Meeting Server [Ww]eb [Aa]pp$', category: meeting, app_id: cisco_meeting_web }
+      - { pattern: '\| ?Microsoft Teams(?: \(PWA\))?$|^(?:Microsoft Teams|Teams(?: \(PWA\))?)(?: - |$)', category: meeting, app_id: teams_web }
+      - { pattern: '^(?:(?:Google )?Meet [-–—] )?[a-z]{3}-[a-z]{4}-[a-z]{3}$|^Google Meet(?: [-–—] .+)?$', category: meeting, app_id: google_meet }
+      - { pattern: '^BigBlueButton(?: - |$)', category: meeting, app_id: bbb }
+      - { pattern: '. \| Jitsi Meet$|^Jitsi Meet$', category: meeting, app_id: jitsi_web }
+      - { pattern: '^(?:Cisco )?Webex(?: Meetings)?(?: [-|] .+)?$', category: meeting, app_id: webex_web }
+      - { pattern: '^Zoom(?: [-|] .+)?$|(?: [-|] )Zoom$|\bZoom (?:Meeting|Workplace)\b', category: meeting, app_id: zoom_web }
+      - { pattern: '^GoTo(?: Meeting)?(?: [-|] .+)?$', category: meeting, app_id: goto_web }
+      - { pattern: '^FaceTime$', category: call, app_id: facetime_web }
+      - { pattern: '^(?:\(\d+\) )?WhatsApp(?: Business| Web)?$', category: messenger, app_id: whatsapp_web }
+      - { pattern: '^(?:\(\d+\) )?Discord(?: \| .+)?$', category: messenger, app_id: discord_web }
+      - { pattern: ' - Slack$|^Slack(?: [-|] .+)?$', category: messenger, app_id: slack_web }
+      - { pattern: '^Element(?: \[\d+\])?(?: \| .+)?$', category: messenger, app_id: element_web }
     note: >-
-      Without window titles (e.g. Wayland), a browser holding the mic stays category `browser`:
-      audio, or video if the camera is on.
+      A browser holding the microphone is recorded as video (see `modes`): most browser calls are
+      meetings whose title carries no service name (a Google Meet call shows the calendar event,
+      a Zoom web call the topic). Safari captures in com.apple.WebKit.GPU, which other apps
+      embedding WebKit share as well.
 
 modes:
   - { when: { category: meeting }, mode: video, reason: meeting_app }
   - { when: { camera_active: true }, mode: video, reason: camera_active }
+  - { when: { category: browser }, mode: video, reason: browser_meeting }
   - { when: {}, mode: audio, reason: default }
 
 ignore:

@@ -24,10 +24,8 @@ from platformdirs import user_state_dir
 from captation.config import APP_AUTHOR, APP_NAME, ensure_private_dir
 
 RECORD_NAME = "terms-acceptance.json"
-USER_METHODS = ("dialog-checkbox", "terminal-checkbox")
-# "test-environment" is written only by the end-to-end test fixture, into its own isolated state
-# directory (tests/e2e/conftest.py); the product never writes it.
-METHODS = (*USER_METHODS, "test-environment")
+METHODS = ("dialog-checkbox", "terminal-checkbox")
+USER_METHODS = METHODS
 
 
 def disclaimer_text() -> str:

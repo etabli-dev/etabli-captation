@@ -19,7 +19,7 @@ ausgewertet.
 | Bild | nur bei Videokonferenzen bzw. eingeschalteter Kamera | Bildschirmaufnahme. Unter Linux/Wayland wird der einmalig freigegebene Bildschirm aufgenommen, nicht nur das Konferenzfenster (Hinweis in den Metadaten) |
 | Metadaten (`session.json`) | je Sitzung | Sitzungs-ID, Projekt-ID, Einwilligungs-Referenz, App-Kennung (z. B. `zoom`), Zeiten, Spuren, Prüfsummen, technische Warnungen |
 | Importierte Aufnahmen | nur nach `captation import` | Audiodatei eines mobilen Aufnahmegeräts, unverändert (ohne Datei-Tags) |
-| Bestätigung des Haftungsausschlusses | einmal je Benutzer und Textfassung (`captation accept`) | lokal im Statusverzeichnis: Textfassung, Prüfsumme, Zeitpunkt, Benutzername des Betriebssystems, Art der Bestätigung |
+| Bestätigung des Haftungsausschlusses | einmal je Benutzer und Textfassung (`captation accept`) | lokal im Statusverzeichnis: Textfassung, Prüfsumme, Zeitpunkt, Benutzername des Betriebssystems, Art der Bestätigung, Programmversion |
 
 **Nicht** gespeichert werden: Fenstertitel (Voreinstellung), Namen, Telefonnummern,
 Meeting-IDs, die ursprünglichen Dateinamen importierter Aufnahmen, Inhalte der

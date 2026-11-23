@@ -1,4 +1,4 @@
-"""ObsController against a real OBS (stage 04). Needs a bootstrapped OBS on Linux."""
+"""ObsController against a real OBS. Needs a bootstrapped OBS on Linux."""
 
 from __future__ import annotations
 

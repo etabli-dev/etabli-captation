@@ -90,7 +90,11 @@ def _launch(cfg: Config, inst: ObsInstallation) -> None:
 
 
 def make_controller(
-    cfg: Config, *, on_lost: Callable[[], None] | None = None, launch: bool = True
+    cfg: Config,
+    *,
+    on_lost: Callable[[], None] | None = None,
+    on_record_stopped: Callable[[], None] | None = None,
+    launch: bool = True,
 ) -> ObsController:
     """An ObsController wired to the real OBS: locate, launch on demand, keyring auth."""
     inst = locate(cfg)
@@ -103,4 +107,5 @@ def make_controller(
         launch=(lambda: _launch(cfg, inst)) if launch else None,
         token_store=FileTokenStore(state / "screencast-token"),
         on_lost=on_lost,
+        on_record_stopped=on_record_stopped,
     )

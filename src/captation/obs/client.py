@@ -1,4 +1,4 @@
-"""Thin obs-websocket v5 client (ADR-002) and the ObsController facade (stage 04).
+"""Thin obs-websocket v5 client (ADR-002) and the ObsController facade.
 
 Only the requests Captation uses are wrapped. The low-level :class:`ObsWebSocket` speaks the
 v5 JSON protocol over ``websockets.sync``: Hello → Identify (with auth) → Identified, requests

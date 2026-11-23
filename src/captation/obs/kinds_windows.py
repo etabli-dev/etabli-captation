@@ -1,4 +1,4 @@
-"""Windows capture profile (stage 07): WASAPI per-application, desktop and microphone audio,
+"""Windows capture profile: WASAPI per-application, desktop and microphone audio,
 Windows Graphics Capture of the call window, display capture as the fallback.
 
 Prepared on Linux from the OBS 33.0.3 sources (``plugins/win-wasapi``, ``plugins/win-capture``,
@@ -154,7 +154,7 @@ class WindowsCaptureProfile(CaptureProfile):
         OBS picks the best-rated window of that executable; with several windows (e.g. a
         meeting window next to the main window) the pick is not guaranteed (PF-243). UWP apps
         whose frame belongs to ``ApplicationFrameHost.exe`` do not match by executable. The
-        stage 07 real-app checks record both cases.
+        the Windows real-app checks record both cases.
         """
         exe = exe_name(process_name, exe_path)
         if not exe:

@@ -138,6 +138,7 @@ class Rig:
     def flush(self) -> None:
         for _ in range(6):
             self.agent.submit(_Query(lambda: None))
+            self.agent.wait_for_workers(timeout_s=60)  # post-processing runs off the loop
 
     def tick(self, seconds: float = 1.0, n: int = 1) -> None:
         for _ in range(n):

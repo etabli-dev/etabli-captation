@@ -5,8 +5,8 @@
 - Auth is always on. `captation obs bootstrap` writes a random 43-character password
   (`secrets.token_urlsafe(32)`) into the obs-websocket config (user-only, 0600) and the OS
   keyring (service `etabli-captation`, user `obs-websocket`). The environment variable
-  `CAPTATION_OBS_PASSWORD` is a fallback. The password is never logged, never written to reports
-  and never passed on a command line (OBS is started without `--websocket_password`).
+  `CAPTATION_OBS_PASSWORD` is a fallback. The password is never logged, never printed and never
+  passed on a command line (OBS is started without `--websocket_password`).
 - A config the user set up with an unknown password is never overwritten; `captation obs
   set-password` stores it instead. Before any change the file is backed up
   (`config.json.bak-<timestamp>`).
@@ -26,8 +26,8 @@ obs-websocket listens on all interfaces and has no loopback-only option (PF-005)
 | `/etc/systemd/system/etabli-captation-obs-guard.service` | oneshot unit that loads the table at boot (`ExecStart=nft -f …`) and deletes it on stop |
 
 The rule is independent of ufw/iptables front ends and also blocks connections from the host's
-own LAN, Tailscale and Docker addresses (PF-015). `--check` runs without root: the unit must be
-active, and connections from every local non-loopback address must fail.
+own LAN address and its other local interface addresses (PF-015). `--check` runs without root:
+the unit must be active, and connections from every local non-loopback address must fail.
 
 **Remove:** `captation obs firewall --remove` (disables the unit, deletes both files and the
 table). `uninstall-autostart` does not touch the rule.
@@ -56,9 +56,9 @@ agent keeps working; the block must be confirmed once from a second device.
   from obsproject.com and the Twitch and Amazon IVS ingest lists (PF-023).** This cannot be
   switched off in OBS; it reveals the machine's IP address to those services but carries no
   recording data. To prevent it, block outbound traffic of the OBS sandbox at the network level.
-- E10 (stage 12) checks the TCP sockets of the agent and of OBS while recording: the agent has
-  only its loopback connection to the websocket port; OBS has no live non-loopback connection
-  (only CLOSE-WAIT leftovers of the start-up fetch above).
+- End-to-end scenario E10 checks the TCP sockets of the agent and of OBS while recording: the
+  agent has only its loopback connection to the websocket port; OBS has no live non-loopback
+  connection (only CLOSE-WAIT leftovers of the start-up fetch above).
 
 ## IPC
 
@@ -78,12 +78,13 @@ timeout in its own process group, and a failure only adds a warning. Hooks are o
 
 Imported files are hashed, copied with a lossless container re-mux that drops all tags
 (`-map_metadata -1`), and verified by an audio stream hash. Original file names and tag text are
-never stored in `session.json`, logs or output (they can hold phone numbers). **Exception
-(stage 13 specification):** if a format cannot be re-muxed losslessly, the file is copied
-unchanged and the session gets the warning `import:metadata_not_stripped`; such a file can still
-carry the device's tags. Check these sessions and strip the tags manually if needed.
+never stored in `session.json`, logs or output (they can hold phone numbers). **Exception:** if
+a format cannot be re-muxed losslessly, the file is copied unchanged and the session gets the
+warning `import:metadata_not_stripped`; such a file can still carry the device's tags. Check
+these sessions and strip the tags manually if needed.
 
 ## Dependencies
 
 Runtime dependencies are checked by `tools/licence_gate.py` (CI). A CycloneDX SBOM is produced by
-the release workflow. `pip-audit` results are recorded in the stage 14 report.
+the release workflow. Before each release, `pip-audit` is run against the runtime dependencies
+and the result is noted in the release notes.

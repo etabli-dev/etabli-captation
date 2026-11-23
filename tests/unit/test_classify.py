@@ -75,8 +75,9 @@ def test_any_call_with_camera_is_video() -> None:
 @pytest.mark.req("R-03")
 def test_other_calls_are_audio() -> None:
     assert run(snap(SIGNAL)) == ("signal", "messenger", 300, "audio", "default")
-    assert run(snap(PHONE)) == ("phone_relay", "call", 90, "audio", "default")
-    assert run(snap(CHROME)) == ("browser", "browser", 500, "audio", "default")
+    assert run(snap(PHONE)) == ("apple_call", "call", 90, "audio", "default")
+    # A browser holding the mic without an identifying title is taken as a meeting (ADR-018).
+    assert run(snap(CHROME)) == ("browser", "browser", 500, "video", "browser_meeting")
 
 
 def test_first_matching_mode_wins_and_fallback_is_audio() -> None:
@@ -101,7 +102,7 @@ def test_first_matching_mode_wins_and_fallback_is_audio() -> None:
     ("mic", "winner"),
     [
         ((SIGNAL, ZOOM), "zoom"),  # meeting > messenger
-        ((WHATSAPP, PHONE), "phone_relay"),  # call > messenger
+        ((WHATSAPP, PHONE), "apple_call"),  # call > messenger
         ((CHROME, SIGNAL), "signal"),  # messenger > browser
         ((PHONE, ZOOM, CHROME, SIGNAL), "zoom"),
     ],

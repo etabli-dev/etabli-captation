@@ -2,7 +2,7 @@
 
 Calls taken on the iPhone itself cannot be recorded in software (known limitation L-01). They
 are recorded on separate hardware and imported into the same verified session structure as
-OBS sessions (architecture §11, stage 13):
+OBS sessions (architecture §11):
 
 ```
 captation import <file-or-folder> --device <profile> --consent-ref <REF>
@@ -11,7 +11,7 @@ captation import <file-or-folder> --device <profile> --consent-ref <REF>
 
 ## Format status
 
-**No real device was available when stage 13 was built.** Every export format below is
+**No real device has been tested yet.** Every export format below is
 **unverified**: it is the expected behaviour from vendor documentation, not an observation.
 There are no PF entries for these devices yet. When a real export is checked, record it in
 `docs/platform-facts.md` (device, firmware/app version, container, codec, sample rate,
@@ -28,7 +28,7 @@ accepted. The profile is recorded as `origin.device` and sets the default app ID
   Turn them off before the first study recording, not after. If a recording reached the vendor
   cloud, treat it as a data protection incident.
 - Export **locally** only: USB mass storage, or the vendor app's export to local storage
-  followed by a cable transfer (or AirDrop) to the workstation. No e-mail, messenger or
+  followed by a cable transfer (or AirDrop) to the computer. No e-mail, messenger or
   third-party cloud on the way.
 - Import with `--dry-run` first. The output lists SHA-256 prefixes, never file names.
 - After a successful import, delete the original on the device and on the phone by hand. The

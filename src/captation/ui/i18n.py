@@ -79,6 +79,14 @@ STRINGS: dict[str, dict[str, str]] = {
         "notify.obs_lost": "OBS ist abgestürzt oder wurde beendet. Falls OBS nach dem "
         "Neustart nach dem abgesicherten Modus fragt: „Normal ausführen“ wählen.",
         "notify.qc_warning": "Qualitätsprüfung: {warnings}",
+        "notify.recording_stopped": "OBS hat die Aufnahme selbst beendet (z. B. Speicher voll "
+        "oder Encoder-Fehler). Captation versucht, die Aufnahme fortzusetzen.",
+        "notify.start_failed": "Die Aufnahme konnte nicht gestartet werden; dieser Anruf wird "
+        "nicht erneut versucht. Details: `captation doctor`.",
+        "notify.countdown_failed": "Der Countdown konnte nicht angezeigt werden. Ohne "
+        "sichtbaren Countdown wird nicht aufgenommen; der Studienmodus wurde beendet.",
+        "notify.stop_failed": "OBS nimmt noch auf, obwohl die Aufnahme beendet werden sollte. "
+        "Captation versucht es weiter; notfalls die Aufnahme in OBS stoppen.",
         "notify.disk_unencrypted": "Hinweis: Der Speicherort ist nicht verschlüsselt.",
         "notify.indicator_lost": "Die Tray-Anzeige ist nicht mehr sichtbar.",
         "notify.fallback": "Benachrichtigungen ohne Aktionen – Abbrechen über das Tray-Menü.",
@@ -157,6 +165,14 @@ STRINGS: dict[str, dict[str, str]] = {
         "notify.obs_lost": "OBS crashed or was closed. If OBS asks about Safe Mode after the "
         "restart, choose “Run Normally”.",
         "notify.qc_warning": "Quality check: {warnings}",
+        "notify.recording_stopped": "OBS stopped the recording on its own (e.g. disk full or "
+        "encoder error). Captation tries to continue the recording.",
+        "notify.start_failed": "The recording could not be started; this call is not retried. "
+        "Details: `captation doctor`.",
+        "notify.countdown_failed": "The countdown could not be shown. Nothing is recorded "
+        "without a visible countdown; study mode was turned off.",
+        "notify.stop_failed": "OBS is still recording although the recording should stop. "
+        "Captation keeps trying; if needed, stop the recording in OBS.",
         "notify.disk_unencrypted": "Note: the storage location is not encrypted.",
         "notify.indicator_lost": "The tray indicator is no longer visible.",
         "notify.fallback": "Notifications without actions – cancel from the tray menu.",

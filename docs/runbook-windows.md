@@ -4,10 +4,10 @@ Windows support was prepared on Linux (ADR-015): the probe, autostart, firewall 
 check, OBS locator, tray back end, IPC pipe and packaging exist and are unit-tested with fakes.
 Every Windows identifier the code relies on is a **`pending`** entry PF-201…PF-270 in
 `docs/platform-facts.md`. On Windows, `tools/check_facts.py` treats each pending Windows fact as
-an error, so stages 03, 07, 11 and 12 cannot pass on Windows until every fact is verified
-(or refuted and replaced) with evidence from this PC.
+an error, so Windows cannot be released until every fact is verified (or refuted and replaced)
+with evidence from this PC.
 
-Run the steps in order. Every step names the stage it belongs to and how to evidence it.
+Run the steps in order. Every step says how to evidence it.
 Never mark a fact `verified` without the command and an excerpt of its output (docs/principles.md §6, §7).
 
 | Prepared file | Purpose |
@@ -19,9 +19,9 @@ Never mark a fact `verified` without the command and an excerpt of its output (d
 | `src/captation/ipc.py` (Windows branch) | Per-user named pipe |
 | `packaging/windows/` | `build.ps1`, PyInstaller spec, Inno Setup script |
 
-## 0. Shared code: state after the Linux merge (2026-11-23)
+## 0. Shared code prepared on Linux
 
-All changes requested from the shared code are merged (verify the behaviour on Windows):
+The shared code already contains the Windows adaptations (verify the behaviour on Windows):
 
 1. `obs/launcher.py` starts OBS with `cwd` = the folder of `obs64.exe` (PF-205).
 2. `service.build_agent` excludes OBS and its helpers via `platform.windows.obs_host_pids`.
@@ -50,28 +50,26 @@ Still open on Windows: the tray-hidden case (L-23) and the second-device firewal
 | ffmpeg and ffprobe on PATH | `winget install --id Gyan.FFmpeg -e` (open a new shell afterwards) | `ffmpeg -version`; `ffprobe -version` |
 | Inno Setup 6.3+ (only for the installer) | `winget install --id JRSoftware.InnoSetup -e` | `Test-Path "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"` |
 | A second device on the same LAN | – | needed once for the firewall test (PF-232) |
-| Headset, webcam, RØDECaster Duo, call partners for Zoom, Teams, Meet/Jitsi, Signal, WhatsApp | – | stage 12 real-app checklist |
+| Headset, webcam, an external audio interface if one is used, call partners for Zoom, Teams, Meet/Jitsi, Signal, WhatsApp | – | real-app checklist (§7) |
 
 Start OBS once from the Start menu, cancel the auto-configuration wizard and close OBS again.
 If Windows Defender Firewall asks whether OBS may communicate on networks, choose **Cancel**
 (no allow rule is needed: the agent connects over loopback, which the firewall never filters).
 
-## 2. Code, local-only files and the test suite
+## 2. Code and the test suite
 
 ```powershell
 git clone https://github.com/etabli-dev/etabli-captation.git C:\src\etabli-captation
 cd C:\src\etabli-captation
 ```
 
-Use a path outside OneDrive. If you keep local, untracked build notes (build state, stage
-reports) on the Linux machine, copy them into the repository root over a private channel (scp
-over SSH or a USB stick, not a cloud share); they are git-ignored.
+Use a path outside OneDrive.
 
 ```powershell
 uv sync
 uv run pytest -m "not obs and not e2e"          # includes the windows-marked tests
 uv run ruff check src tests tools
-uv run mypy --strict src                        # see gap 7
+uv run mypy --strict src                        # see §0 item 7
 uv run python tools/check_facts.py              # lists every pending Windows fact as an error
 ```
 
@@ -79,9 +77,21 @@ uv run python tools/check_facts.py              # lists every pending Windows fa
 already exercise real APIs: registry round trip under HKCU, ConsentStore read, psutil, AUMID,
 primary monitor name and a named-pipe round trip (PF-210, PF-215, PF-223, PF-244, PF-260).
 
-Run the stages in order (03, 07, 11, 12); this runbook lists what each of them has to show on Windows.
+**Disclaimer and configuration (before the OBS setup).** Accept the disclaimer first (the gate
+itself is checked in section 5), then create the user configuration. On Windows the config file
+is `%LOCALAPPDATA%\etabli\captation\config.yaml` (platformdirs `user_config_dir`):
 
-## 3. Stage 03 (windows): OBS bootstrap, facts, firewall
+```powershell
+uv run captation accept                         # dialog with checkbox; details in section 5
+New-Item -ItemType Directory -Force "$env:LOCALAPPDATA\etabli\captation" | Out-Null
+Copy-Item config\config.example.yaml "$env:LOCALAPPDATA\etabli\captation\config.yaml"
+# edit: data_root on a BitLocker-encrypted drive (PF-225/226), project_id
+uv run captation check-config                   # ok <digest>
+```
+
+Then work through sections 3 to 7 in order; section 8 lists every fact to flip.
+
+## 3. OBS setup and platform facts: bootstrap, facts, firewall
 
 1. **Locate OBS** (PF-201…PF-204): `uv run captation doctor` → `obs ✅ OBS 33.0.x (native)`.
    Verify the registry and version facts with the PF-202/PF-203 commands.
@@ -94,12 +104,12 @@ Run the stages in order (03, 07, 11, 12); this runbook lists what each of them h
    Compare-Object (Import-Csv before.csv) (Import-Csv after.csv) -Property Hash, Path   # empty
    ```
    List profiles and scene collections before and after (`Get-ChildItem $cfg\basic\profiles`,
-   `…\basic\scenes`): non-Captation entries unchanged (DoD 5). Delete the CSV files afterwards.
+   `…\basic\scenes`): non-Captation entries unchanged. Delete the CSV files afterwards.
 3. **Launch flags** (PF-205, PF-206): with OBS started by the agent,
    `Get-CimInstance Win32_Process -Filter "Name='obs64.exe'" | Select CommandLine` → verified flags
-   only, `--disable-updater` present, **no password** (DoD 6).
+   only, `--disable-updater` present, **no password**.
 4. **Facts dump**: `uv run captation obs facts --out docs/platform-facts.md` writes the
-   `facts:windows` section (needs gaps 3 and 4). Check it lists the five kinds of PF-240 and
+   `facts:windows` section (needs §0 items 3 and 4). Check it lists the five kinds of PF-240 and
    the defaults/items of PF-241…PF-244, and contains no device names or window titles.
 5. **Firewall** (PF-208, PF-230…PF-232):
    ```powershell
@@ -111,7 +121,7 @@ Run the stages in order (03, 07, 11, 12); this runbook lists what each of them h
    From the second device: `nc -vz <pc-lan-ip> 4455` (or `Test-NetConnection <ip> -Port 4455`)
    → refused or timed out. Optionally `--remove` (UAC again) → the remote test connects → `--apply`
    again. Declining the UAC prompt once must end with "UAC prompt declined" (PF-230).
-6. **Test recordings** (DoD 3, ADR-009 on Windows): in OBS select profile `Captation-Audio`,
+6. **Test recordings** (ADR-009 on Windows): in OBS select profile `Captation-Audio`,
    record 10 s, then `Captation-Video`, 10 s. `ffprobe -hide_banner <file>.mkv` → audio profile:
    `h264 128x72 30 fps` + 3 × `pcm_s24le 48000 Hz`; CPU while recording:
    `Get-Counter '\Process(obs64)\% Processor Time' -SampleInterval 2 -MaxSamples 4` (divide by the
@@ -122,16 +132,15 @@ Run the stages in order (03, 07, 11, 12); this runbook lists what each of them h
    Creating `Captation Local` (start a segment) → in use; stop → released.
 8. **Egress** (PF-207): OBS Help menu offers only a manual crash-log upload; `--disable-updater`
    in the command line (step 3).
-9. **Secrets** (DoD 6): `git grep -n "<password prefix>"` → nothing; search the agent log
+9. **Secrets**: `git grep -n "<password prefix>"` → nothing; search the agent log
    (`Select-String -Path "$env:LOCALAPPDATA\etabli\captation\Logs\*" -Pattern <prefix>`, the
    platformdirs log dir unless `logging.dir` is set) and the OBS logs → nothing; process list
    from step 3 → nothing.
 
-Report: `reports/STAGE-03-windows.md`. Stage 03 is a per-OS checkpoint only if a fact deviates
-from Linux in a way that changes code paths (for example strategy B fails, or OBS binds
-loopback-only).
+If a fact deviates from Linux in a way that changes code paths (for example strategy B fails,
+or OBS binds loopback-only), add it to the open questions (section 10) before continuing.
 
-## 4. Stage 07: detection on Windows
+## 4. Detection on Windows
 
 1. **Hive check (PF-210…PF-212)**: run
    `uv run python -m captation.platform.windows --watch 1` in one window while you start and end
@@ -139,11 +148,11 @@ loopback-only).
    and `stale`. Compare every in-use row with Settings → Privacy & security → Microphone / Camera
    ("Currently in use"). Record per app type which hive shows the live state.
 2. **Live probe**: `uv run captation doctor --probe` during a real call prints one JSON line per
-   poll (`mic`, `camera_active`, `camera`). DoD 1: a Signal or WhatsApp call **and** a Zoom or
+   poll (`mic`, `camera_active`, `camera`). A Signal or WhatsApp call **and** a Zoom or
    Teams meeting each appear within 2 polls after the call starts and disappear within 2 polls
    after it ends. Keep the timestamped excerpts (app IDs only, no titles).
-3. **OBS idle** (DoD 2): OBS running, no call, 60 s of `doctor --probe` → OBS never listed.
-4. **Per-app audio isolation** (DoD 3, PF-241): during a Zoom call, play a test tone from another
+3. **OBS idle**: OBS running, no call, 60 s of `doctor --probe` → OBS never listed.
+4. **Per-app audio isolation** (PF-241): during a Zoom call, play a test tone from another
    program (for example `ffplay -nodisp -f lavfi -i "sine=frequency=1000"`). After the segment:
    ```powershell
    ffmpeg -hide_banner -i seg01_remote.flac -af "bandpass=f=1000:width_type=h:w=50,volumedetect" -f null - 2>&1 | Select-String max_volume
@@ -155,7 +164,7 @@ loopback-only).
 6. **Window titles** (PF-216): the Meet-in-browser classification (`google_meet`) needs titles;
    check that the session's `app_id` is `google_meet` while titles stay out of `session.json`
    unless `detection.store_window_titles` is true.
-7. **Fixtures** (stage 07 task 6): export the ConsentStore keys during a call
+7. **Fixtures**: export the ConsentStore keys during a call
    (`reg export "HKCU\Software\Microsoft\Windows\CurrentVersion\CapabilityAccessManager\ConsentStore" cs-hkcu.reg`,
    same for HKLM), replace the user name in every path with `alice`, convert them to JSON under
    `tests/fixtures/windows/` and add tests that load them into `FakeRegistry`
@@ -164,11 +173,10 @@ loopback-only).
    `MSTeams_…`, WhatsApp `5319275A.WhatsAppDesktop_…`, Signal, Webex, Jitsi), each with a new
    PF-2xx row (Windows build + app version + evidence).
 
-Report: `reports/STAGE-07.md`.
+## 5. Tray smoke test on Windows (tray, toasts, dialog)
 
-## 5. Stage 09 smoke test on Windows (tray, toasts, dialog)
-
-**Disclaimer gate first (R-59, ADR-017):** before acceptance, arming is refused with
+**Disclaimer gate first (R-59, ADR-017):** withdraw the acceptance from section 2
+(`uv run captation accept --revoke`); with the agent running, arming must be refused with
 `terms_not_accepted`. `uv run captation accept` opens the Tk dialog: the checkbox unlocks only
 after scrolling to the end, *Akzeptieren* only while it is ticked, *Ablehnen* accepts nothing.
 After accepting, `captation accept --status` exits 0 and `doctor` reports `terms` as ok. The
@@ -186,7 +194,7 @@ installer's last page offers the same dialog (checked by default); confirm it op
 - second attempt records: icon red, tooltip with mode, app ID and elapsed time; the start
   reminder toast appears; "Studienmodus beenden" stops and finalises.
 
-## 6. Stage 11 (windows): autostart, doctor, packaging
+## 6. Autostart, doctor, packaging
 
 1. **Autostart** (PF-220…PF-224):
    ```powershell
@@ -199,16 +207,17 @@ installer's last page offers the same dialog (checked by default); confirm it op
    ```
    The running agent re-creates the AUMID key at its next start; the installer's uninstaller
    removes it for good.
-2. **Logon** (DoD 1): install autostart, sign out and in (or reboot) → no console window,
+2. **Logon**: install autostart, sign out and in (or reboot) → no console window,
    tray icon present, `uv run captation status` → `DISARMED`.
 3. **Restart on failure** (PF-222): `taskkill /F /IM pythonw.exe` (dev) or `captationw.exe`
    (packaged) → note whether the task restarts the agent within about a minute.
 4. **BitLocker** (PF-225, PF-226): `captation doctor` → `disk_encryption`; cross-check with an
    elevated `Get-BitLockerVolume -MountPoint C:`.
-5. **doctor on a clean account** (DoD 3): create a local standard user, sign in, install the
+5. **doctor on a clean account**: create a local standard user, sign in, install the
    packaged build there, run `captation doctor`. Expected explained warnings: `autostart` (until
-   installed), `obs.websocket` (OBS not running), `rules` (`verify: true` until stage 12).
-6. **Packaged build** (DoD 4, PF-270):
+   installed), `obs.websocket` (OBS not running), `rules` (`verify: true` until the real-app
+   checklist in section 7 is done).
+6. **Packaged build** (PF-270):
    ```powershell
    powershell -ExecutionPolicy Bypass -File packaging\windows\build.ps1 -Installer
    ```
@@ -220,9 +229,7 @@ installer's last page offers the same dialog (checked by default); confirm it op
    (remove it with `captation obs firewall --remove` before uninstalling, if wanted).
    Quit the agent from the tray before uninstalling or upgrading.
 
-Report: `reports/STAGE-11-windows.md`.
-
-## 7. Stage 12 (windows): end-to-end and real apps ⛳
+## 7. End-to-end checks and real apps
 
 The automated harness in `tests/e2e/` is Linux-only (PipeWire, D-Bus stubs, v4l2loopback).
 On Windows run the scenarios manually or port the harness; E4, E5, E9, E10, E12 and E13 can
@@ -257,7 +264,7 @@ root.mainloop()
 winsound.PlaySound(None, 0); mci("close cap", None, 0, None)
 ```
 
-Use `tests/e2e/rules.e2e.yaml` as `detection.user_rules_file` (with the `(\.exe)?` fix, gap 6).
+Use `tests/e2e/rules.e2e.yaml` as `detection.user_rules_file` (with the `(\.exe)?` fix, §0 item 6).
 For E3 start a camera user during the call (Windows Camera app, or
 `ffmpeg -f dshow -i video="<camera name>" -f null -`).
 
@@ -277,26 +284,33 @@ For E3 start a camera user during the call (Windows Camera app, or
 | E12 | `--remove` the firewall rule | `captation arm` refused (exposure); after `--apply` it arms; LAN connect from the second device fails |
 | E13 | Tray unavailable: start the agent with `$env:PYSTRAY_BACKEND = 'none'` (pystray then fails to load its back end) | arming refused (`no_tray`), `doctor` → tray ❌ |
 
-Metrics for the report: start latency, mode-switch gap, CPU and RAM of the agent and of
+Metrics for the release notes: start latency, mode-switch gap, CPU and RAM of the agent and of
 `obs64.exe` while idle-armed and while recording audio and video
 (`Get-Process -Id <pid> | Select CPU, WorkingSet64` sampled twice, or `Get-Counter`).
 
-**Real-app checklist** (`reports/E2E-windows.md`). For each row record the detected app ID, mode,
+**Real-app checklist** (record the results in the release notes). For each row record the detected app ID, mode,
 start latency, remote-track isolation (no system sounds on the remote track), echo on the local
 track (headset vs speakers) and issues:
 
 | App / path | Windows |
 |---|---|
 | Zoom desktop meeting (video) | ☐ |
-| Teams meeting (video), new Teams (MSIX) | ☐ |
-| Meet or Jitsi in Chrome and in Edge | ☐ |
+| Teams meeting (video), new Teams (MSIX): ConsentStore key `MSTeams_…` or `msedgewebview2.exe`? | ☐ |
+| Webex App meeting: `CiscoCollabHost.exe` or `webexhost.exe`? | ☐ |
+| Meet, Teams web, BigBlueButton, Cisco Meeting Server web app in Chrome and in Edge (title → app ID) | ☐ |
+| FaceTime link in Chrome or Edge (`facetime_web`) | ☐ |
 | Signal Desktop voice → video | ☐ |
-| WhatsApp Desktop (Store) voice call | ☐ |
-| RØDECaster Duo as audio device / external input | ☐ |
+| WhatsApp (Store, WebView2): package key or `msedgewebview2.exe`? | ☐ |
+| Phone Link call (iPhone or Android over Bluetooth): which process and ConsentStore entry? | ☐ |
+| Cisco Jabber call, a softphone if used (MicroSIP, Zoiper, 3CX) | ☐ |
+| Discord / Slack huddle | ☐ |
+| An app without a rule (recorded as `unknown`) | ☐ |
+| External audio interface (if used) as audio device / external input | ☐ |
+
+The expected identifiers per app are in `docs/app-coverage.md`.
 
 Then: no `verify: true` rule remains for Windows; `uv run pytest` (unit, integration with OBS,
-windows tests) is green; `uv run python tools/traceability.py > reports/traceability-windows.txt`;
-report `reports/STAGE-12-windows.md`.
+windows tests) is green; `uv run python tools/traceability.py` shows every requirement covered.
 
 ## 8. Verify and flip every pending fact
 
@@ -305,7 +319,7 @@ For each row: run the command, compare with the expected value, then edit the ro
 version, app version, Evidence = the command actually run → an output excerpt, Date. If the
 fact is wrong: set `refuted`, add a new PF-2xx row with the correct value, change the code to
 reference the new ID, and add a test. At the end, on Windows:
-`uv run python tools/check_facts.py` → `facts ok`, and `--release` → `facts ok`.
+`uv run python tools/check_facts.py` → `facts ok`, and `--release --os windows` → `facts ok`.
 
 | PF | Fact (short) | Command (full text in the PF row) | Section |
 |---|---|---|---|
@@ -337,7 +351,7 @@ reference the new ID, and add a test. At the end, on Windows:
 | PF-232 | Loopback exempt, LAN blocked, block wins | `Test-NetConnection` local + second device | 3.5 |
 | PF-240 | Input kinds | facts dump | 3.4 |
 | PF-241 | Process capture `window`/`priority`, isolation | facts dump; tone test | 3.4, 4.4 |
-| PF-242 | `device_id` | facts dump; RØDECaster row | 3.4, 7 |
+| PF-242 | `device_id` | facts dump; external-interface row | 3.4, 7 |
 | PF-243 | Window capture `method`/`priority`, window pick | facts dump; Zoom/Teams video | 3.4, 7 |
 | PF-244 | Monitor capture `monitor_id` | facts dump; `primary_monitor_device()` | 3.4 |
 | PF-250 | pystray tray | smoke test | 5 |
@@ -356,10 +370,10 @@ SmartScreen shows "Windows protected your PC" on the first start of `setup.exe`,
 With **Smart App Control** on (Windows 11, Settings → Privacy & security → Windows Security →
 App & browser control), unsigned apps are blocked outright and there is no "Run anyway".
 Code signing (an OV/EV certificate in the release workflow) removes the hard block and builds
-reputation over time; it is optional (stage 11). Add this paragraph to
-`docs/known-limitations.md` in stage 11.
+reputation over time; it is optional. The short form of this section is L-22 in
+`docs/known-limitations.md`.
 
-## 10. Checkpoint questions for the owner (stage 12 ⛳, and stage 03 if facts deviate)
+## 10. Open questions for the maintainer (after the end-to-end checks, earlier if a fact deviates)
 
 1. **Hive result:** which hive carries the live state on this PC? Keep reading both hives
    (labelled), or restrict the probe to HKCU?
@@ -378,7 +392,7 @@ reputation over time; it is optional (stage 11). Add this paragraph to
 7. **Toast buttons:** if the countdown toast's *Abbrechen* button does not reach the agent, is the
    tray-menu cancel (fallback step 2) acceptable on Windows?
 8. **Code signing:** buy a certificate for releases, or ship unsigned with the SmartScreen note?
-9. **ADR-003 / ADR-007:** confirm pystray + desktop-notifier as the Windows back end and full
-   Windows support in v1 (provisional so far).
+9. **ADR-003:** confirm pystray + desktop-notifier as the Windows back end once the smoke test
+   (section 5) passes. Full Windows support in v1 (ADR-007) is already accepted.
 10. **Deviations from Linux:** audio-only strategy B, encoder choice (`obs_x264` vs NVENC/AMF/QSV
     from the facts dump), mic-release latency: any change to ADR-009/ADR-010 for Windows?

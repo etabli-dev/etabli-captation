@@ -3,8 +3,9 @@
 Format: context, options, licence (for dependencies), decision, consequences, verify-by.
 Package facts (version, release date, licence) are from PyPI and Flathub on 2026-11-23.
 
-Status values: **accepted** (settled), **provisional** (default chosen during the Linux build
-run of 2026-11-23, waiting for the owner's confirmation), **open**.
+Status values: **accepted** (settled; the code and the release rely on it), **provisional**
+(default chosen, not yet confirmed by the maintainer), **open**. An accepted decision that still
+has to be checked on another operating system says what is pending there.
 
 ---
 
@@ -17,7 +18,7 @@ run of 2026-11-23, waiting for the owner's confirmation), **open**.
   needed are reachable through subprocess tools (`pw-dump`), D-Bus or a small native helper
   (macOS probe, ADR-004).
 - **Consequences:** packaging needs a freezer (ADR-005). Startup and memory are higher than Go/Rust.
-- **Verify-by:** stage 12 metrics (CPU and RAM while idle-armed and recording).
+- **Verify-by:** end-to-end metrics (CPU and RAM while idle-armed and recording).
 
 ## ADR-002 — obs-websocket client
 
@@ -35,7 +36,7 @@ run of 2026-11-23, waiting for the owner's confirmation), **open**.
   `websockets.sync.client` API, with a reader thread for events.
 - **Consequences:** we implement the v5 handshake (auth = base64(sha256(base64(sha256(password +
   salt)) + challenge))) and request/response matching ourselves. Small and fully typed.
-- **Verify-by:** stage 04 integration tests against OBS 33.
+- **Verify-by:** integration tests (`pytest -m obs`) against OBS 33.
 
 ## ADR-003 — Tray and notifications
 
@@ -49,24 +50,26 @@ run of 2026-11-23, waiting for the owner's confirmation), **open**.
   | `desktop-notifier` | MIT | 6.2.0, 2025-08-08 | Notifications with actions on all three OSes |
   | PySide6 (Qt) | LGPL-3.0 / GPL | 6.12.0, 2026-10-08 | ~200 MB, LGPL relinking duties |
   | In-house D-Bus (StatusNotifierItem + com.canonical.dbusmenu + org.freedesktop.Notifications) on `dbus-fast` | MIT | 5.2.0, 2026-10-02 | Linux only, pure Python, no system build deps |
-- **Decision (provisional):**
+- **Decision (accepted for Linux; implemented for macOS and Windows, to be verified there):**
   - **Linux:** in-house D-Bus tray and notifications on `dbus-fast` (MIT). Tray availability is
     detected from `org.kde.StatusNotifierWatcher` (`IsStatusNotifierHostRegistered`).
   - **macOS and Windows:** `pystray` (LGPL-3.0) for the tray and `desktop-notifier` (MIT) for
-    notifications, installed only on those platforms. To be confirmed in stages 06/07 and the
-    stage 09 smoke test on those OSes. LGPL relinking is possible because `pystray` ships as a
-    replaceable Python module (documented in `docs/licensing.md`).
+    notifications, installed only on those platforms. To be verified on macOS and Windows with
+    the tray smoke test of each runbook (PF-126, PF-250…PF-252). LGPL relinking is possible
+    because `pystray` ships as a replaceable Python module (documented in `docs/licensing.md`).
 - **Consequences:** Linux avoids GTK/PyGObject entirely. Two tray back ends behind one interface
-  (`captation/ui/tray.py`).
-- **Verify-by:** stage 09 smoke test per OS, stage 12 E13.
+  (`UiBackend` in `captation/ui/base.py`, selected through `captation/ui/tray.py`).
+- **Verify-by:** tray smoke test per OS; end-to-end scenario E13.
 
 ## ADR-004 — macOS probe
 
 - **Context:** per-process mic detection needs CoreAudio process objects (macOS 14+).
 - **Options:** Swift CLI helper `captation-probe` (default); `pyobjc` (MIT).
-- **Decision (provisional):** Swift CLI, as specified in stage 06.
+- **Decision (accepted; verification on macOS pending):** Swift CLI helper. The macOS platform
+  code (`captation/platform/macos.py`) relies on it; its identifiers are pending facts
+  PF-113…PF-119.
 - **Consequences:** a SwiftPM package in `probes/macos/`, codesigned with the app.
-- **Verify-by:** stage 06 (needs macOS).
+- **Verify-by:** detection checks on macOS (`docs/runbook-macos.md` §3, §7).
 
 ## ADR-005 — Packaging
 
@@ -77,43 +80,47 @@ run of 2026-11-23, waiting for the owner's confirmation), **open**.
   | PyInstaller | GPL-2.0-or-later **with bootloader exception** | 6.22.3, 2026-09-12 | Build tool only; the exception allows any licence for built apps |
   | Briefcase | BSD-3-Clause | 0.4.7, 2026-10-27 | Native installers, heavier template system |
   | Nuitka | **AGPL-3.0-or-later** (4.x) | 4.3.5, 2026-11-08 | Rejected: fails the licence gate |
-- **Decision (provisional):** PyInstaller one-folder builds. PyInstaller is a dev/build
+- **Decision (accepted):** PyInstaller one-folder builds. PyInstaller is a dev/build
   dependency only and is not a runtime dependency (the licence gate checks runtime
   dependencies). Linux ships a tarball with an install script. AppImage and Flatpak are deferred.
-- **Verify-by:** stage 11 (packaged build starts, tray shows, `captation status` works).
+  The macOS `.app` and the Windows installer use the same approach and are still to be built and
+  checked on those systems.
+- **Verify-by:** packaging check per OS (packaged build starts, tray shows, `captation status`
+  works): done on Linux, pending on macOS and Windows.
 
 ## ADR-006 — Minimum versions and Linux OBS distribution
 
-- **Context:** OBS 33.0 dropped Ubuntu 24.04. The build machine runs Ubuntu 26.04 LTS.
+- **Context:** OBS 33.0 dropped Ubuntu 24.04. The Linux reference system runs Ubuntu 26.04 LTS.
   Ubuntu's archive ships `obs-studio 32.1.0-0ubuntu3` (built by Ubuntu). Flathub ships the
   official OBS Project build `com.obsproject.Studio 33.0.3`, plus the extension
   `com.obsproject.Studio.Plugin.PipeWireAudioCapture 1.2.2`.
 - **Options (Linux):** Ubuntu 26.04 `.deb` (32.1, distro build) vs Flatpak (33.0.3, upstream build).
-- **Decision (accepted, owner 2026-11-23):** Linux uses the **Flatpak** (installed per user:
+- **Decision (accepted, 2026-11-23):** Linux uses the **Flatpak** (installed per user:
   `flatpak install --user flathub com.obsproject.Studio com.obsproject.Studio.Plugin.PipeWireAudioCapture`).
-  A native `obs` on PATH is also supported. Minimum versions are set from the stage 03 facts
-  (see ADR-009 and the stage 03 section of `docs/platform-facts.md`): OBS ≥ 32.0 (opt-in crash
+  A native `obs` on PATH is also supported. Minimum versions are set from the OBS facts
+  (see ADR-009 and the Linux rows of `docs/platform-facts.md`): OBS ≥ 32.0 (opt-in crash
   upload setting exists; obs-websocket ≥ 5.3.0 for `SetRecordDirectory`). macOS ≥ 14
-  *(verify, stage 06)*. Windows 10 22H2 / 11 *(verify, stage 07)*.
+  *(to be verified on macOS)*. Windows 10 22H2 / 11 *(to be verified on Windows)*.
 - **Consequences:** Flatpak changes the config path (`~/.var/app/com.obsproject.Studio/config/obs-studio`)
-  and PIDs inside the sandbox are namespaced (stage 05 resolves host PIDs).
-- **Verify-by:** stages 03 and 05 on Linux.
+  and PIDs inside the sandbox are namespaced (the Linux probe resolves host PIDs, PF-001, PF-017).
+- **Verify-by:** OBS setup and detection checks on Linux (done).
 
 ## ADR-007 — Windows in v1
 
 - **Options:** full support vs best effort.
-- **Decision (accepted, owner 2026-11-23):** full support, as the default. Stage 07 runs on Windows.
-- **Verify-by:** stage 07, stage 12 on Windows.
+- **Decision (accepted, 2026-11-23):** full support. The Windows-specific checks run on a
+  Windows PC (`docs/runbook-windows.md`).
+- **Verify-by:** detection and end-to-end checks on Windows (`docs/runbook-windows.md` §4, §7).
 
 ## ADR-008 — Video capture default
 
 - **Options:** `window_preferred` (privacy: only the meeting window) vs `display` (robust, but
   captures everything on screen).
-- **Decision (accepted, owner 2026-11-23):** `window_preferred`. Where the window cannot be targeted, display
+- **Decision (accepted, 2026-11-23):** `window_preferred`. Where the window cannot be targeted, display
   capture is used and `session.json` gets a warning (docs/principles.md §3.6). On Linux Wayland, window
   targeting goes through the screencast portal and is not dynamic, so Linux uses the portal
-  source with the warning `capture:display_fallback` (stage 05).
-- **Verify-by:** stages 04/05 (Linux), 06, 07.
+  source with the warning `capture:display_fallback`.
+- **Verify-by:** integration and detection checks on Linux (done), macOS and Windows (pending).
 
 ## ADR-012 — Websocket exposure
 
@@ -126,8 +133,9 @@ run of 2026-11-23, waiting for the owner's confirmation), **open**.
     port from every source address that is not loopback. It is loaded at boot by a oneshot
     systemd unit, so the rule is independent of ufw/iptables front ends. `--remove` deletes
     exactly the unit, the rule file and the table. Details: `docs/security.md`.
-  - macOS: `pf` anchor; Windows: `New-NetFirewallRule` (stages 06/07).
-- **Verify-by:** stage 03 (`obs firewall --check`), stage 12 E12.
+  - macOS: `pf` anchor; Windows: `New-NetFirewallRule` (prepared; pending verification,
+    PF-123…PF-125 and PF-230…PF-232).
+- **Verify-by:** `obs firewall --check` during the OBS setup on each OS; end-to-end scenario E12.
 
 ## ADR-009 — Audio-only recording strategy
 
@@ -140,13 +148,13 @@ run of 2026-11-23, waiting for the owner's confirmation), **open**.
   - B: `RecType=Standard`, MKV, `obs_x264`, `ffmpeg_pcm_s24le`, canvas 128×72 at 10 fps →
     `h264 128x72` + 3 × `pcm_s24le 48 kHz stereo`, plays, OBS 3.8 % of one core. **Passes.**
     1 fps also works, but the x264 lookahead delays the first packet and the stop by ~12 s.
-  - Stage 04 follow-up: at 10 fps the stop takes 1.76 s because of the x264 lookahead flush,
+  - Follow-up measurement: at 10 fps the stop takes 1.76 s because of the x264 lookahead flush,
     so the audio → video switch gap was 2.24 s. At 30 fps the stop takes 0.6 s, the gap is
     1.05–1.09 s, and OBS uses 4.6 % of one core.
 - **Decision (accepted for Linux):** strategy **B**, 128×72 at 30 fps, audio `pcm_s24le`
   (first available entry of `codec_preference`). Post-processing writes `segNN_audio.mka`
   without the dummy video. Re-check A on macOS/Windows only if B fails there.
-- **Verify-by:** stage 04 integration tests, stage 10 FFT mapping tests.
+- **Verify-by:** integration tests, FFT track-mapping unit tests.
 
 ## ADR-010 — Mic release
 
@@ -156,7 +164,7 @@ run of 2026-11-23, waiting for the owner's confirmation), **open**.
   releases the mic.
 - **Decision (accepted for Linux):** create the Captation inputs at segment start and remove
   them at stop. The alternative (keep the input with no device) is unnecessary at 5 ms.
-- **Verify-by:** stage 12 E5 (60 s idle, armed, OBS running → no session).
+- **Verify-by:** end-to-end scenario E5 (60 s idle, armed, OBS running → no session).
 
 ## ADR-013 — OBS 33 has no `--disable-shutdown-check`
 
@@ -166,92 +174,158 @@ run of 2026-11-23, waiting for the owner's confirmation), **open**.
 - **Options:** (a) wait for the websocket after a relaunch and tell the user to choose
   *Run Normally*; (b) delete OBS's crash sentinel before relaunching (changes OBS-internal state
   outside the Captation profiles/collection, docs/principles.md §4.2).
-- **Decision (provisional):** (a). Recovery relaunches OBS and waits up to 30 s for the
+- **Decision (accepted):** (a). Recovery relaunches OBS and waits up to 30 s for the
   websocket; if it does not come up, the segment stays `interrupted`, the session is finalised
-  and a notification asks the user to confirm the OBS dialog. Measured in stage 12 (E7).
-- **Verify-by:** stage 12 E7.
+  and a notification asks the user to confirm the OBS dialog. Measured in end-to-end scenario E7
+  on Linux; to be re-checked on macOS and Windows.
+- **Verify-by:** end-to-end scenario E7.
 
 ## ADR-014 — Tray indicator lost while armed
 
 - **Context:** GNOME disables user extensions while the screen is locked, so the AppIndicator
-  tray host disappears (observed on the build machine: `org.gnome.ScreenSaver.GetActive` → true,
+  tray host disappears (observed on GNOME 50: `org.gnome.ScreenSaver.GetActive` → true,
   extension state INACTIVE). docs/principles.md §2.5/§2.8: never record without a visible indicator.
-- **Decision (accepted, owner 2026-11-23):** arming is refused while no tray host exists. If the host
+- **Decision (accepted, 2026-11-23):** arming is refused while no tray host exists. If the host
   disappears while armed but not recording, the agent disarms and notifies. If it disappears
   during a recording, the recording continues (participants consented and the call is live),
   every affected session gets the warning `ui:indicator_lost`, and the indicator is restored as
   soon as the host is back (the SNI item re-registers on `NameOwnerChanged`).
-- **Verify-by:** unit test `test_indicator_loss`; stage 12 E13.
+- **Verify-by:** unit test `test_indicator_loss`; end-to-end scenario E13.
 
 ## ADR-003 update (2026-11-23)
 
-The provisional macOS/Windows back ends (`pystray`, `desktop-notifier`) were removed from the
-dependencies until stages 06/07 verify them on those systems. Until then, macOS and Windows use
-`UnavailableUi`: `tray_available()` is false, so arming is always refused there (fail-safe).
+The macOS/Windows back end is implemented in `captation/ui/pystray_ui.py` (`pystray` tray,
+`desktop-notifier` notifications) and used by `captation/ui/macos.py` and
+`captation/ui/windows.py`. `pystray`, `Pillow` and `desktop-notifier` are runtime dependencies on
+macOS and Windows only (platform markers in `pyproject.toml`). `captation/ui/base.py`
+(`default_backend()`) loads the module of the current OS; if it cannot be loaded, the agent falls
+back to `UnavailableUi`: `tray_available()` is false, so arming is refused (fail-safe). The back
+end is still to be verified on macOS and Windows (PF-126, PF-250…PF-252).
 
 ## ADR-015 — macOS/Windows prepared on Linux, verified on their machines
 
-- **Context:** owner instruction 2026-11-23: "Make all steps ready on Linux while Mac and win need
-  to do the last steps on their own machines." docs/principles.md §6 requires every OS-specific
-  identifier to be verified before code relies on it.
-- **Decision (accepted, owner instruction):** macOS and Windows code (probe, autostart, firewall,
+- **Context:** macOS and Windows support is prepared on Linux; the last steps can only be done on
+  a Mac and a Windows PC. docs/principles.md §6 requires every OS-specific identifier to be
+  verified before code relies on it.
+- **Decision (accepted, 2026-11-23):** macOS and Windows code (probe, autostart, firewall,
   disk encryption, OBS locator, tray, packaging) is written and unit-tested with fakes on Linux.
   Its identifiers get PF entries with status **`pending`** (macOS PF-101…199, Windows
   PF-201…299). `tools/check_facts.py` tolerates a pending fact only when it runs on a different
-  OS; on the target OS (and with `--release`) every pending fact is an error. The stage runs on
-  the Mac and the Windows PC (runbooks `docs/runbook-macos.md`, `docs/runbook-windows.md`) verify
-  each fact, set it to `verified` (or refute and replace it), and only then pass.
-- **Consequences:** the hard rule keeps its effect where it matters (nothing ships and no stage
-  on that OS passes with an unverified fact); CI on Linux stays green meanwhile. The release
-  workflow runs `check_facts.py --release`.
-- **Verify-by:** stages 03/06/11/12 on macOS, 03/07/11/12 on Windows.
+  OS; on the target OS (and with `--release`) every pending fact is an error. The runbooks for
+  the Mac and the Windows PC (`docs/runbook-macos.md`, `docs/runbook-windows.md`) verify each
+  fact and set it to `verified` (or refute and replace it); only then can that OS be released.
+- **Consequences:** the hard rule keeps its effect where it matters (nothing ships on an OS with
+  an unverified fact); CI on Linux stays green meanwhile. The release workflow runs
+  `check_facts.py --release --os <os>` per platform: Linux is built on every release tag, macOS
+  and Windows only once their own facts are verified (otherwise their build is skipped with a
+  notice).
+- **Verify-by:** OBS setup, detection, packaging and end-to-end checks in each runbook;
+  `check_facts.py --release --os <os>` on each OS.
 
-## ADR-016 — Owner decisions at the Linux checkpoint (2026-11-23)
+## ADR-016 — Decisions before the Linux release (2026-11-23)
 
-Asked interactively after the Linux build; recorded verbatim as chosen.
+Decided by the maintainer once the Linux build was complete.
 
 | Topic | Decision |
 |---|---|
-| Project licence (stage 14) | **Proprietary, all rights reserved** (as the other private Établi tools); no licence headers; can be opened later |
-| Storage | `data_root` on an encrypted volume (`/data/CaptationData` on the Linux workstation); **`storage.require_disk_encryption: block`** is the product default, so arming is refused on unencrypted storage (and while `/data` is not unlocked) |
+| Project licence | **Proprietary, all rights reserved**; no licence headers; may be opened later |
+| Storage | `data_root` on an encrypted volume (for example a folder on a LUKS-encrypted data partition); **`storage.require_disk_encryption: block`** is the product default, so arming is refused while `data_root` resolves to unencrypted storage (for example while the encrypted volume is not yet unlocked and mounted) |
 | OBS start-up egress (L-19, PF-023) | **Accepted and documented**; no network block for OBS |
 | Windows in v1 (ADR-007) | **Full support** |
 | Video capture default (ADR-008) | **`window_preferred`** (meeting window; screen fallback with a warning) |
 | Linux OBS distribution (ADR-006) | **Flatpak** (official OBS build) |
-| Release plan | **v0.1.0 = Linux**, tagged after the Linux real-call checklist (reports/E2E-linux.md); macOS and Windows follow as v0.2.0 once their facts are verified |
+| Release plan | **v0.1.0 = Linux**, tagged after the Linux real-call checklist of the release checklist; macOS and Windows follow as v0.2.0 once their facts are verified |
 | Transcription hook | **None preconfigured**; examples in docs/hooks.md |
 | Tray lost during a recording (ADR-014) | **Continue with a warning**; no new recording until the indicator is back |
 | Auto-disarm | **240 min** (default unchanged) |
-| Project ID on the workstation | **unassigned** until the study is registered |
-| macOS target | **macOS 26** on the owner's Mac (per-process detection available, ≥ 14) |
+| Project ID of the first deployment | **unassigned** until the study is registered |
+| macOS target | **macOS 26** as the reference system (per-process detection needs ≥ 14) |
 
 ## ADR-017 — Public, source-available repository; disclaimer and acceptance gate (2026-11-23)
 
-- **Context:** the owner decided to make the repository public, with a strict notice that any use
-  needs prior approval and a thorough legal disclaimer that every user confirms with a checkbox
-  before use. Asked what "approval" covers, the owner chose *both*: use of the software needs the
-  owner's prior written approval, and every recording needs the prior, documented consent of all
-  persons recorded (plus ethics and data-protection approval for research).
-- **Decision (accepted, owner 2026-11-23):**
+- **Context:** the repository is made public, with a strict notice that any use needs prior
+  approval and a thorough legal disclaimer that every user confirms with a checkbox before use.
+  "Approval" covers *both*: use of the software needs the copyright holder's prior written
+  approval, and every recording needs the prior, documented consent of all persons recorded
+  (plus ethics and data-protection approval for research).
+- **Decision (accepted, 2026-11-23):**
   - The repository is public; the licence stays proprietary ("source available": `LICENSE` grants
     no rights, use requires prior written approval).
   - `DISCLAIMER.md` (English and German, the German version prevails) holds the strict notice and
     the disclaimer: intended and prohibited use, the user's responsibility as controller under the
     GDPR, legal framework examples, what consent must cover, technical safeguards are not legal
     compliance, no legal advice, warranty and liability within German law, third-party software,
-    acceptance, applicable law. It is not legal advice; the owner has it reviewed before relying
-    on it.
+    acceptance, applicable law. It is not legal advice and is to be reviewed legally before
+    anyone relies on it.
   - **Acceptance gate (R-59, principles §2.10):** `captation accept` shows the packaged text in a
     dialog whose checkbox unlocks only after scrolling to the end (or, without a display, as a
     terminal checkbox ticked with `x`). There is no flag and no non-interactive path. The record
-    (text version, SHA-256, time, OS user name, method) is stored in the user's state directory
-    and bound to the text's hash, so a changed text needs a new acceptance. Without it the agent
+    (text version, SHA-256, time, OS user name, method, app version) is stored in the user's
+    state directory and bound to the text's hash, so a changed text needs a new acceptance. Without it the agent
     refuses to arm (`terms_not_accepted`), imports are refused and `doctor` reports an error.
     The record is the user's declaration, not copy protection.
   - The Linux install script and the Windows installer run `captation accept` after installation;
     the macOS runbook verifies the dialog.
-  - The git history was replaced by a single commit before publication; the previous history is
-    kept as a local bundle only.
+  - The repository was published with a fresh history that starts with a single initial commit.
 - **Consequences:** unit and integration tests run with the gate patched open (marker
-  `terms_gate` keeps the real check); the end-to-end suite uses its own state directory with a
-  `test-environment` record and never touches the user's acceptance.
+  `terms_gate` keeps the real check); the end-to-end suite points `XDG_STATE_HOME` at its own
+  directory, writes a simulated terminal-checkbox record (user `e2e-test`) there and never touches
+  the user's acceptance. The product accepts only the two interactive methods.
+
+## ADR-018 — App coverage: all call apps, native and in the browser (2026-11-23)
+
+- **Context:** the owner requires recordings to work with all apps and with the browser versions
+  of online meetings: FaceTime, phone calls, WhatsApp, Signal, Teams, BigBlueButton, Cisco
+  Meeting Server, Cisco Webex, Zoom and others, also for calls that start on an iPhone. The rules
+  covered a few apps; Vivaldi (`vivaldi-bin`, PF-025), Flatpak messengers and the macOS call
+  daemon were missed, and the browser title rules were both too broad (`zoom` in any title) and
+  blind to real in-call titles.
+- **Decision (accepted):**
+  - Default rules cover the apps in `docs/app-coverage.md` per OS by process name, macOS bundle
+    ID, Windows package and (new) Linux Flatpak app ID (`package` also matches
+    `pipewire.access.portal.app_id`). FaceTime and iPhone calls on the Mac are `apple_call`
+    (microphone in `com.apple.avconferenced`); Windows Phone Link is `phone_link`; SIP/VoIP
+    softphones are `softphone`.
+  - Browser page titles are normalised (invisible characters, no-break spaces, the browser's own
+    suffix) and matched by anchored rules per service, including Cisco Meeting Server's fixed
+    title. On Linux, Firefox-family browsers supply the capturing tab's title through PipeWire
+    (PF-026). `detection.extra_meeting_titles` adds an institution's own meeting pages.
+  - **A browser holding the microphone is recorded as video** (`browser_meeting`) when the page
+    cannot be identified: most browser calls are meetings whose in-call title names no service
+    (Google Meet shows the event, Zoom the topic). On Windows/macOS the browser window is
+    captured; on Linux the approved screen (L-25).
+  - **`detection.record_unknown_apps` defaults to `true`**: any other app opening the microphone
+    while study mode is on is recorded as `unknown` after the usual countdown (L-30).
+  - iPhone/iPad cannot run the software; calls are taken on the Mac, FaceTime is joined from a
+    browser, or mobile hardware is used with `captation import` (L-29).
+  - Identifiers from documentation keep `verify: true` until confirmed on the real OS.
+- **Consequences:** R-03, R-06 and R-60; `docs/app-coverage.md`; L-25…L-30; PF-024…PF-026.
+
+## ADR-019 — Fail-closed recording control (2026-11-23)
+
+- **Context:** a correctness audit found paths where the consent guard or the indicator could be
+  bypassed: a countdown whose display failed still turned into a recording at its deadline; OBS
+  kept recording without indicator when the agent died; an unconfirmed stop was treated as done;
+  timers stopped when a poll failed; a browser tab switch ended the session; a refused start
+  retried endlessly; post-processing blocked the event loop.
+- **Decision (accepted):**
+  - A countdown turns into a recording only after the UI confirmed it was shown
+    (`CountdownShown`); without confirmation it is cancelled, the app is not offered again and
+    study mode ends (`countdown_failed`).
+  - A watchdog process (started by the agent, connected by a pipe) stops a Captation recording
+    and removes the Captation inputs if the agent ends without shutting down. At start-up a
+    leftover recording is stopped before stale sessions are finalised.
+  - An unconfirmed stop is checked and retried; while OBS still records, the session stays in
+    STOPPING (indicator on) and the user is told (`stop_failed`).
+  - A failed poll counts as "no call", so auto-disarm and the stop debounce keep running.
+  - A different app ID is debounced like a lost call; a different app ID of the same process (a
+    tab or title change) continues the session.
+  - OBS lost or stopping on its own: recovery at most three times per session, background
+    reconnection while armed; a refused start finalises the session once as `failed`.
+  - Post-processing and finalising run on worker threads; one lock serialises OBS access.
+  - Tray arming without an answer in the consent-reference dialog does not arm; the acceptance
+    is re-checked right before each countdown; the macOS/Windows tray counts as available only
+    once the icon is shown.
+- **Consequences:** R-09, R-17, R-53 and R-61; tests in `tests/unit/test_session_hardening.py`
+  and `tests/unit/test_hardening_paths.py`.
+

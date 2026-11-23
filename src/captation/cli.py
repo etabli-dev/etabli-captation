@@ -72,7 +72,7 @@ def run(config: ConfigOpt = None) -> None:
 
     try:
         cfg = load_config(config)
-        service.run(cfg)
+        service.run(cfg, str(config) if config is not None else None)
     except ConfigError as exc:
         fail(str(exc))
     except service.AlreadyRunning as exc:
@@ -117,6 +117,20 @@ def stop() -> None:
 def cancel() -> None:
     """Cancel a pending start during the countdown."""
     _print_reply(_send({"type": "cancel"}))
+
+
+@app.command(hidden=True)
+def watchdog(config: ConfigOpt = None) -> None:
+    """Internal: started by the agent; stops a Captation recording if the agent dies."""
+    from captation import watchdog as wd
+    from captation.logs import setup_logging
+
+    try:
+        cfg = load_config(config, create_data_root=False)
+    except ConfigError as exc:
+        fail(str(exc))
+    setup_logging(cfg.logging.level, cfg.logging.dir, cfg.data_root_path)
+    wd.watch(sys.stdin, lambda: wd.stop_captation_recording(cfg))
 
 
 # ---- disclaimer acceptance (R-59) ----------------------------------------------------------------
@@ -300,7 +314,9 @@ def obs_facts(
     except (launcher.ObsNotFound, ObsError, OSError) as exc:
         fail(str(exc))
     try:
-        data = facts.collect(ws, Path(inst.config_dir))
+        data = facts.collect(ws, Path(inst.config_dir), cfg.obs.scene_collection)
+    except ObsError as exc:
+        fail(str(exc))
     finally:
         ws.close()
     port = cfg.obs.websocket.port

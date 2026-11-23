@@ -13,6 +13,7 @@ from captation.session import (
     ArmRefused,
     BeginSession,
     Command,
+    CountdownShown,
     Disarm,
     Disarmed,
     Event,
@@ -144,6 +145,9 @@ class Driver:
     clock: FakeClock = field(default_factory=FakeClock)
     ids: FakeIds = field(default_factory=FakeIds)
     log: list[tuple[float, Event, list[Command], State, bool]] = field(default_factory=list)
+    # Like the real executor: a countdown that was shown is confirmed right away. Tests of the
+    # fail-closed path set this to False.
+    ack_countdown: bool = True
 
     def __post_init__(self) -> None:
         self.m = SessionMachine(self.params, self.clock, self.ids)
@@ -156,6 +160,13 @@ class Driver:
         self.clock.t += dt
         cmds = self.m.handle(event)
         self.log.append((self.clock.t, event, cmds, self.m.state, self.m.armed))
+        if self.ack_countdown:
+            for cmd in cmds:
+                if isinstance(cmd, NotifyCountdown):
+                    shown = CountdownShown(cmd.session_id)
+                    extra = self.m.handle(shown)
+                    self.log.append((self.clock.t, shown, extra, self.m.state, self.m.armed))
+                    cmds = [*cmds, *extra]
         return cmds
 
     def send_s(self, event: Event, dt: float = 0.0) -> list[str]:

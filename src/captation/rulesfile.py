@@ -1,4 +1,4 @@
-"""Reading rules files: packaged default, user rules file, schema validation (stage 02).
+"""Reading rules files: packaged default, user rules file, schema validation.
 
 This is the I/O half of the rules handling. ``rules.py`` holds the pure half (data classes,
 merging, compiling and ``classify``) and must stay free of file, process and clock access.

@@ -3,7 +3,8 @@ description: >-
   Signal and WhatsApp (same category) hold the microphone together. Without other hints the
   rule order picks WhatsApp (c). When Signal also uses the camera it wins (b). Once Signal is
   being recorded it stays the context although the camera goes off, because it is the
-  running session's app (a). When only WhatsApp is left, that is an app change.
+  running session's app (a). When only WhatsApp is left, that is an app change: it is debounced
+  like a stop, so the Signal session ends after stop_debounce_s.
 reqs: [R-05, R-09]
 apps:
   signal: {pid: 300, process_name: signal-desktop}
@@ -37,9 +38,12 @@ steps:
       - ShowReminder
     state: RECORDING
   - {t: 20, mic: [whatsapp, signal], camera: false, context: signal/audio, expect: [], state: RECORDING}
-  - {t: 30, mic: [whatsapp], context: whatsapp/audio, expect: ["StopSegment(1)", Teardown], state: STOPPING}
-  - {t: 31, event: segment_stopped, expect: [RunPostprocess, "SetTrayState(armed)"]}
-  - {t: 32, event: postprocess_done, expect: ["WriteSessionJson(complete)"], state: PENDING_START}
-  - {t: 33, mic: [], expect: [], state: ARMED_IDLE}
+  - {t: 30, mic: [whatsapp], context: whatsapp/audio, expect: [], state: PENDING_STOP}
+  - {t: 35, mic: [whatsapp, signal], context: signal/audio, expect: [], state: RECORDING}
+  - {t: 36, mic: [whatsapp], context: whatsapp/audio, expect: [], state: PENDING_STOP}
+  - {t: 46, mic: [whatsapp], expect: ["StopSegment(1)", Teardown], state: STOPPING}
+  - {t: 47, event: segment_stopped, expect: [RunPostprocess, "SetTrayState(armed)"]}
+  - {t: 48, event: postprocess_done, expect: ["WriteSessionJson(complete)"], state: PENDING_START}
+  - {t: 49, mic: [], expect: [], state: ARMED_IDLE}
 final_state: ARMED_IDLE
 sessions: 1

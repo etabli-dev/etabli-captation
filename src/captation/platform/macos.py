@@ -1,5 +1,5 @@
-"""macOS platform services: OBS locator (stage 03), Swift-probe client (stage 06), FileVault
-check and LaunchAgent autostart (stage 11).
+"""macOS platform services: OBS locator, Swift-probe client, FileVault
+check and LaunchAgent autostart.
 
 Prepared on Linux (ADR-015): every macOS identifier carries a ``# PF-1xx`` reference to a
 **pending** fact in ``docs/platform-facts.md``; the Mac run verifies them
@@ -53,7 +53,7 @@ def _default_runner(argv: list[str], timeout: float) -> subprocess.CompletedProc
     return _run(argv, timeout)
 
 
-# ---- OBS locator (stage 03) ----------------------------------------------------------------
+# ---- OBS locator ----------------------------------------------------------------
 
 OBS_APP_NAME = "OBS.app"  # PF-101
 OBS_APP_DIRS = ("/Applications", "~/Applications")  # PF-101
@@ -224,11 +224,11 @@ def crash_upload_settings(config_dir: Path) -> dict[str, str]:
     return found
 
 
-# ---- Swift probe client (stage 06) ---------------------------------------------------------
+# ---- Swift probe client ---------------------------------------------------------
 
 HELPER_NAME = "captation-probe"  # PF-119
 HELPER_REPO_REL = "probes/macos/CaptationProbe/.build/release"  # PF-119
-HELPER_PKG_REL = "_bin/macos"  # not-a-fact: build-time copy inside the package (stage 06)
+HELPER_PKG_REL = "_bin/macos"  # not-a-fact: build-time copy inside the package
 HELPER_ENV = "CAPTATION_PROBE"  # not-a-fact: developer override of the helper path
 ARG_ONCE = "--once"  # not-a-fact: our helper's CLI (probes/macos/CaptationProbe/README.md)
 ARG_WATCH = "--watch"  # not-a-fact: our helper's CLI
@@ -714,7 +714,7 @@ class MacProbe:
             ts_monotonic=ts,
             mic_users=users,
             camera_active=reading.camera_active,
-            camera_users=(),  # CoreMediaIO has no attribution (stage 06)
+            camera_users=(),  # CoreMediaIO has no attribution
             window_titles=reading.window_titles,
             confidence=reading.confidence,
         )
@@ -723,7 +723,7 @@ class MacProbe:
         self._stop_proc()
 
 
-# ---- disk encryption (stage 10/11) -----------------------------------------------------------
+# ---- disk encryption -----------------------------------------------------------
 
 FDESETUP = "/usr/bin/fdesetup"  # PF-120
 FDE_ON = "FileVault is On."  # PF-120
@@ -781,7 +781,7 @@ class MacDiskEncryption:
         return "unknown"  # not-a-fact: internal status value
 
 
-# ---- autostart: LaunchAgent (stage 11) -------------------------------------------------------
+# ---- autostart: LaunchAgent -------------------------------------------------------
 
 LABEL = "de.etabli.captation"  # not-a-fact: our own launchd label (= bundle ID)
 LAUNCH_AGENTS_REL = "Library/LaunchAgents"  # PF-122
@@ -967,10 +967,18 @@ class MacPlatform:
     def obs_locator(self, executable: str | None) -> MacObsLocator:
         return MacObsLocator(executable)
 
-    def probe(self, *, exclude_pids: frozenset[int], store_titles: bool) -> MacProbe:
+    def probe(
+        self,
+        *,
+        exclude_pids: frozenset[int],
+        store_titles: bool,
+        obs_capturing: Callable[[], bool] | None = None,
+    ) -> MacProbe:
         # Titles are read in memory where the Screen Recording permission allows it (the
-        # helper never prompts); store_titles only decides what is stored (docs/principles.md §3.1).
-        return MacProbe(exclude_pids=exclude_pids, titles=True)
+        # helper never prompts); store_titles only decides what is stored (principles §3.1).
+        # obs_capturing keeps OBS's own microphone use from starting or ending a call in the
+        # low-confidence fallback (principles §5.2).
+        return MacProbe(exclude_pids=exclude_pids, titles=True, obs_capturing=obs_capturing)
 
     def disk_encryption(self) -> MacDiskEncryption:
         return MacDiskEncryption()

@@ -20,12 +20,14 @@ jobs:
       - uses: astral-sh/setup-uv@1db35dd8eee11c5894872e0b383ae6c406cf738d # v10.4.0
         with:
           python-version: "3.12"
-      - name: Install ffmpeg
+      - name: Install ffmpeg, age and dbus
+        # age: the encryption tests (R-47) are skipped without it. dbus-daemon: the Linux tray
+        # and notification tests run against a private session bus.
         shell: bash
         run: |
           case "$RUNNER_OS" in
-            Linux) sudo apt-get update && sudo apt-get install -y ffmpeg ;;
-            macOS) brew install ffmpeg ;;
+            Linux) sudo apt-get update && sudo apt-get install -y ffmpeg age dbus ;;
+            macOS) brew install ffmpeg age ;;
             Windows) choco install ffmpeg -y --no-progress ;;
           esac
       - run: uv sync --locked
@@ -33,7 +35,7 @@ jobs:
         run: uv run python tools/sync_specs.py --check
       - name: Platform facts
         # CI runners cannot verify OS facts: pending macOS/Windows facts (ADR-015) are enforced on
-        # the target machines (stage runs) and by the release gate (check_facts --release).
+        # the target machines (stage runs) and by the release gate (check_facts --release --os).
         run: uv run python tools/check_facts.py --os linux
       - run: uv run ruff check src tests tools
       - run: uv run ruff format --check src tests tools
@@ -42,5 +44,17 @@ jobs:
         run: uv run pytest -m "not obs and not e2e"
       - name: Licence gate (runtime dependencies)
         run: uv run python tools/licence_gate.py
-      - name: Requirement traceability
+      - name: Requirement traceability (strict)
+        # Every requirement outside tools/traceability.py EXTERNAL_EVIDENCE needs a passed test.
+        # Strict on Linux only: the Linux-only tests are skipped on the other runners.
+        if: runner.os == 'Linux'
+        run: uv run python tools/traceability.py --strict
+      - name: Requirement traceability (report)
+        if: runner.os != 'Linux'
         run: uv run python tools/traceability.py
+      - name: macOS probe (build and Swift tests)
+        if: runner.os == 'macOS'
+        working-directory: probes/macos/CaptationProbe
+        run: |
+          swift build -c release
+          swift test

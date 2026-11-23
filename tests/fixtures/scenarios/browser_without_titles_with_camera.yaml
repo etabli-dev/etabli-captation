@@ -2,7 +2,9 @@ name: Browser without window titles, camera on
 description: >-
   A browser renderer process holds the microphone (attributed to its parent browser), no
   window titles are available (e.g. Wayland) and the OS cannot attribute the camera. The
-  call stays category browser and is recorded in video mode because the camera is active.
+  call stays category browser and is recorded in video mode because the camera is active;
+  without the camera it would still be video (an unidentified browser call is taken as a
+  meeting, ADR-018).
 reqs: [R-02, R-04, R-07]
 apps:
   renderer:
@@ -23,7 +25,7 @@ steps:
       - "WriteSessionJson(recording)"
       - ShowReminder
     state: RECORDING
-  - {t: 30, mic: [renderer], camera: false, context: browser/audio, expect: [], state: RECORDING}
+  - {t: 30, mic: [renderer], camera: false, context: browser/video, expect: [], state: RECORDING}
   - {t: 31, mic: [], expect: [], state: PENDING_STOP}
   - {t: 41, mic: [], expect: ["StopSegment(1)", Teardown], state: STOPPING}
   - {t: 42, event: segment_stopped, expect: [RunPostprocess, "SetTrayState(armed)"]}

@@ -54,8 +54,9 @@ class DetectionConfig(_Strict):
     stop_debounce_s: float
     rules_file: str
     user_rules_file: str | None = None
-    record_unknown_apps: bool = False
+    record_unknown_apps: bool = True
     store_window_titles: bool = False
+    extra_meeting_titles: list[str] = Field(default_factory=list)
 
 
 class TracksConfig(_Strict):
@@ -111,7 +112,7 @@ class ObsConfig(_Strict):
     @model_validator(mode="after")
     def _safe_launch_args(self) -> ObsConfig:
         # --startrecording/--startreplaybuffer/--startstreaming/--safe-mode/--websocket_* would
-        # bypass the consent guard or the exposure policy (stage 14 review, finding 4).
+        # bypass the consent guard or the exposure policy (release review).
         bad = [a for a in self.launch_args if a not in SAFE_OBS_LAUNCH_ARGS]
         if bad:
             raise ValueError(

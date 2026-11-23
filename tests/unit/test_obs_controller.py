@@ -157,13 +157,73 @@ def test_video_capture_needs_an_approved_token(tmp_path: Path) -> None:
     assert ctl.prepare_segment("video", TARGET).warnings == ()
 
 
+SWITCHES = frozenset(
+    {"SetCurrentProfile", "SetCurrentSceneCollection", "CreateProfile", "CreateSceneCollection"}
+)
+
+
+class GuardedObs(FakeObs):
+    """Records every profile or scene-collection request that arrives while OBS records."""
+
+    def __init__(self, **kw: Any) -> None:
+        super().__init__(**kw)
+        self.violations: list[str] = []
+
+    def request(
+        self, request_type: str, data: dict[str, Any] | None = None, *, timeout_s: float = 10
+    ) -> dict[str, Any]:
+        if request_type in SWITCHES and self.recording:
+            self.violations.append(request_type)
+        return super().request(request_type, data, timeout_s=timeout_s)
+
+
+class FakeClock:
+    """Stands in for the controller's ``time`` module: sleeping advances the clock at once."""
+
+    def __init__(self) -> None:
+        self.now = 1000.0
+
+    def monotonic(self) -> float:
+        return self.now
+
+    def sleep(self, seconds: float) -> None:
+        self.now += seconds
+
+
 @pytest.mark.req("R-38")
-def test_no_profile_switch_while_recording(tmp_path: Path) -> None:
-    ctl, fake = make(tmp_path)
-    fake.recording = True  # someone else's recording
+def test_no_profile_or_collection_switch_while_recording(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr("captation.obs.controller.time", FakeClock())
+    # Someone else's recording, OBS on another profile and collection: the segment needs a
+    # switch to Captation-Audio and the Captation collection, which must not happen now.
+    ctl, fake = make(tmp_path, GuardedObs(), token_store=MemTokens(None))
+    assert (fake.current_profile, fake.current_collection) == ("Untitled", "Untitled")
+    fake.recording = True
     with pytest.raises(ObsError, match="recording"):
-        ctl._ensure_idle(grace_s=0.2)
-    assert "SetCurrentProfile" not in fake.names()
+        ctl.prepare_segment("audio", TARGET)
+    with pytest.raises(ObsError, match="recording"):
+        ctl.approve_screen(timeout_s=1)
+    assert fake.violations == [] and not SWITCHES & set(fake.names())
+    assert "CreateInput" not in fake.names() and fake.inputs == {}
+    assert (fake.current_profile, fake.current_collection) == ("Untitled", "Untitled")
+
+    # Our own recording: a camera upgrade needs the video profile, which waits for the stop.
+    fake.recording = False
+    ctl.prepare_segment("audio", TARGET)
+    ctl.start_segment(tmp_path / "rec", "seg01_container")
+    sent_before = len(fake.calls)
+    with pytest.raises(ObsError, match="recording"):
+        ctl.prepare_segment("video", TARGET)
+    assert not SWITCHES & set(fake.names()[sent_before:])
+    assert fake.current_profile == "Captation-Audio" and fake.recording
+
+    # After the stop the switch is allowed, and none was ever sent while recording.
+    ctl.stop_segment()
+    ctl.teardown_segment()
+    ctl.prepare_segment("video", TARGET)
+    assert fake.current_profile == "Captation-Video"
+    assert fake.violations == []
 
 
 def test_record_status_lag_is_waited_out(tmp_path: Path) -> None:

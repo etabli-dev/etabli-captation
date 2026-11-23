@@ -1,7 +1,8 @@
 # Établi Captation — Target Architecture (stack v2)
 
-Status: specification. Everything marked *(verify)* must be confirmed on the real OS and
-recorded in `docs/platform-facts.md` before code relies on it (docs/principles.md §6).
+Status: specification, updated to the implementation. Everything marked *(verify)* must be
+confirmed on the real OS and recorded in `docs/platform-facts.md` before code relies on it
+(docs/principles.md §6).
 
 ## 1. Overview
 
@@ -19,7 +20,7 @@ recorded in `docs/platform-facts.md` before code relies on it (docs/principles.m
 │   (armed? countdown, cancel)  ───────────────────────▶  debounce, segments, mode upgrade       │
 │                                                                   │ commands                   │
 │                                                                   ▼                            │
-│                                                        ObsController (obs/client.py)           │
+│                                                        ObsController (obs/controller.py)       │
 │                                                         profile/scene switch, inputs, tracks,  │
 │                                                         start/stop, crash recovery             │
 │                                                                   │ obs-websocket v5 (127.0.0.1)│
@@ -38,13 +39,15 @@ recorded in `docs/platform-facts.md` before code relies on it (docs/principles.m
 
 | Component | Module | Responsibility |
 |---|---|---|
-| CLI | `cli.py` (Typer) | `run`, `arm`, `disarm`, `status`, `stop`, `doctor`, `obs bootstrap`, `obs facts`, `install-autostart`, `uninstall-autostart`, `version` |
+| CLI | `cli.py` (Typer) | `run`, `arm`, `disarm`, `status`, `stop`, `cancel`, `accept`, `doctor`, `import`, `check-config`, `install-autostart`, `uninstall-autostart`, `version`; `obs bootstrap`, `obs facts`, `obs approve-screen`, `obs set-password`, `obs firewall` |
+| Acceptance gate | `terms.py`, `ui/terms_dialog.py` | `captation accept`: `DISCLAIMER.md` with a checkbox; the record binds to the text's SHA-256 (R-59) |
 | IPC | `ipc.py` | CLI ↔ running agent. `multiprocessing.connection` (AF_UNIX on POSIX, named pipe on Windows) with a random authkey stored in a user-only (0600) file |
 | Agent loop | `agent.py` | Wires probe → classifier → session. Owns timers |
 | CallProbe | `platform/*.py` | Returns `ProbeSnapshot` (§4) |
 | Classifier | `rules.py` | Pure function `classify(snapshot, rules, config) → CallContext | None` |
 | Session | `session.py` | Pure state machine (§6), emits commands to ObsController and UI |
-| ObsController | `obs/client.py` | All obs-websocket traffic. Reconnect with backoff, event handling |
+| ObsController | `obs/controller.py` | All OBS control: profile/scene switches, Captation inputs, track routing, start/stop, crash recovery |
+| obs-websocket client | `obs/client.py` | Thin v5 client (auth handshake, request/response matching, event reader thread; ADR-002) |
 | OBS bootstrap | `obs/bootstrap.py` | Creates `Captation*` profiles and scene collection, websocket config, facts dump |
 | OBS launcher | `obs/launcher.py` | Locates and starts OBS with verified CLI flags, waits for the websocket |
 | Post-processing | `postprocess.py` | ffprobe inventory, track extraction, remux, verification |
@@ -53,21 +56,21 @@ recorded in `docs/platform-facts.md` before code relies on it (docs/principles.m
 | Firewall | `obs/firewall.py` | Checks, and with consent applies, the inbound block rule for the websocket port per OS (§9) |
 | Storage / integrity | `storage.py`, `integrity.py` | Folder layout, `session.json`, SHA-256, read-only, disk-encryption check, free-space check, optional age encryption |
 | Hooks | `hooks.py` | `on_session_complete` argv with placeholders, timeout, logging |
-| UI | `ui/tray.py`, `ui/notify.py` | Tray states, countdown with *Cancel*, reminders |
+| UI | `ui/base.py`, `ui/tray.py`, `ui/notify.py`; back ends `ui/linux.py` (D-Bus), `ui/pystray_ui.py` (macOS/Windows) | Tray states, countdown with *Cancel*, reminders (ADR-003) |
 
-## 3. Platform matrix (expected, every row *(verify)*)
+## 3. Platform matrix (Linux verified; macOS and Windows *(verify)*, pending facts in `docs/platform-facts.md`)
 
 | Capability | Linux | macOS | Windows |
 |---|---|---|---|
 | Mic in use, per process | `pw-dump`: nodes with `media.class = Stream/Input/Audio`, running, with `application.process.id/binary/name` | Swift probe: CoreAudio process objects (`kAudioHardwarePropertyProcessObjectList`, `kAudioProcessPropertyPID` (macOS 14+), `…BundleID`, `…IsRunningInput`). **Poll**: property listeners for `IsRunningInput` are reported not to fire. Fallback: `kAudioDevicePropertyDeviceIsRunningSomewhere` plus frontmost app (`confidence: low`) | Registry `…\CapabilityAccessManager\ConsentStore\microphone` in HKCU (also check HKLM, keep the hive labelled). Packaged apps appear by package family name, `NonPackaged\` by `#`-separated exe paths. In use ⇔ `LastUsedTimeStop == 0` |
 | Camera in use | PipeWire `Stream/Input/Video` nodes, plus `/proc/*/fd` → `/dev/video*` | CoreMediaIO `kCMIODevicePropertyDeviceIsRunningSomewhere` | Same ConsentStore under `webcam` |
-| Window titles (optional) | X11: `wmctrl -lp`/`xprop`. Wayland: unavailable | `CGWindowListCopyWindowInfo` (needs Screen Recording permission) | `EnumWindows` + `GetWindowThreadProcessId` |
+| Window titles (optional) | Not read: unavailable on Wayland, and no X11 path is implemented (PF-019, L-15) | `CGWindowListCopyWindowInfo` (needs Screen Recording permission) | `EnumWindows` + `GetWindowThreadProcessId` |
 | Per-app audio in OBS | Plugin `obs-pipewire-audio-capture`. Fallback: desktop audio (warn) | "macOS Audio Capture" (ScreenCaptureKit), application mode | "Application Audio Capture" (WASAPI process loopback) |
-| Video capture in OBS | PipeWire screen capture via portal with restore token. X11: XComposite window capture | "macOS Screen Capture" (ScreenCaptureKit), window or display | Window Capture (WGC) or Display Capture |
+| Video capture in OBS | PipeWire screen capture via the portal with a restore token; no window targeting on Wayland, so the approved screen is captured (`capture:display_fallback`) | "macOS Screen Capture" (ScreenCaptureKit), window or display | Window Capture (WGC) or Display Capture |
 | Autostart | XDG autostart `.desktop` (default) or `systemd --user` | LaunchAgent `~/Library/LaunchAgents/de.etabli.captation.plist` | Task Scheduler task "At log on", least privilege |
-| Disk-encryption check | dm-crypt below `data_root` (`lsblk`, `/sys/block/dm-*/dm/uuid` starts with `CRYPT-`) | `fdesetup status` | `Get-BitLockerVolume` (may need elevation, otherwise report `unknown`) |
-| OBS distribution | OBS 33 dropped Ubuntu 24.04 → Ubuntu 26.04 `.deb` or Flatpak (`com.obsproject.Studio`: different config path, sandboxed plugins) | `/Applications/OBS.app` | `%ProgramFiles%\obs-studio` |
-| Websocket firewall rule | `nftables`/`ufw` rule: drop non-loopback → port | `pf` anchor (application firewall is per app, not per port) | `New-NetFirewallRule` inbound block, remote ≠ loopback (needs elevation once) |
+| Disk-encryption check | dm-crypt layer below `data_root` (`findmnt --target` + `lsblk -s`, PF-020); other layers → `unknown` | `fdesetup status` | `Get-BitLockerVolume` (may need elevation, otherwise report `unknown`) |
+| OBS distribution | Flatpak `com.obsproject.Studio` (default, ADR-006: different config path, sandboxed plugins) or a native `obs` on PATH | `/Applications/OBS.app` | `%ProgramFiles%\obs-studio` |
+| Websocket firewall rule | Dedicated `nftables` table `inet etabli_captation` (drop non-loopback → port), loaded by a oneshot systemd unit; independent of ufw/iptables front ends (ADR-012) | `pf` anchor (application firewall is per app, not per port) | `New-NetFirewallRule` inbound block, remote ≠ loopback (needs elevation once) |
 
 Browser helper processes (e.g. `Google Chrome Helper`, `com.google.Chrome.helper…`) are
 normalised to their parent app before classification.
@@ -162,14 +165,14 @@ leaves no media file; arming is refused while the exposure policy is unmet.
 |---|---|---|
 | `Captation Remote` | per-app capture of `capture_target` (fallback: desktop audio, warning) | 1 + `tracks.remote` |
 | `Captation Local` | `recording.audio.local_input`: `follow_default`, or a device name (it must match the device the call app uses; QC catches a mismatch) | 1 + `tracks.local` |
-| `Captation External` | optional `external_input_device` (e.g. RØDECaster) | 1 + `tracks.external` |
+| `Captation External` | optional `external_input_device` (e.g. a USB audio interface) | 1 + `tracks.external` |
 
 Track 1 is always the mix.
 
-- **Audio-only strategy**, chosen empirically in stage 03:
+- **Audio-only strategy**, chosen empirically (ADR-009):
   (A) the profile records audio only (e.g. custom FFmpeg output), or
-  (B) minimal canvas (e.g. 128×72, lowest FPS), then the video stream is dropped in post-processing.
-  B is the guaranteed fallback.
+  (B) minimal canvas, then the video stream is dropped in post-processing.
+  A still writes an H.264 stream on Linux, so B is used: 128×72 at 30 fps (PF-008).
 - **Audio codec**: first available from `recording.audio.codec_preference`
   (lossless PCM/FLAC in MKV preferred) *(verify per OBS version)*.
 
@@ -191,6 +194,31 @@ Track 1 is always the mix.
 Finalised files are made read-only. `session.json` is written atomically (temp file + rename)
 and updated at every state change.
 
+### Warnings in `session.json`
+
+`warnings` lists codes, never personal data. A warning never blocks finalisation.
+
+| Code | Meaning |
+|---|---|
+| `qc:remote_silent`, `qc:local_silent` | The remote or local track is silent for longer than `qc.silence_warn_s` |
+| `qc:clipping` | A track peaks above −0.5 dBFS |
+| `qc:failed:<role>:<segNN>` | QC of one file could not run |
+| `remote:desktop_fallback` | The call app could not be captured per application; the remote track holds desktop audio |
+| `local:device_not_found` | `recording.audio.local_input` names a device OBS does not offer; the local track follows the default input |
+| `external:device_not_found` | `recording.audio.external_input_device` was not found; no external track was recorded |
+| `capture:display_fallback` | Video mode with `window_preferred`, but the screen (not the meeting window) was captured |
+| `capture:not_approved` | No screen capture available (Wayland: not yet approved with `captation obs approve-screen`); the video is black |
+| `storage:disk_unencrypted` | `data_root` is on unencrypted storage (only with `storage.require_disk_encryption: warn`; `block` refuses arming) |
+| `storage:disk_encryption_unknown` | Whether `data_root` is encrypted could not be determined (for example BitLocker without elevation); arming was allowed |
+| `obs:websocket_exposed` | `obs.exposure_policy: warn` and the firewall rule for the websocket port was not confirmed when the session started |
+| `ui:indicator_lost` | The tray indicator disappeared during the recording (ADR-014) |
+| `agent:recovered_after_crash` | The agent stopped during the recording; at its next start the session was finalised as `interrupted`, media as written by OBS |
+| `postprocess:<problem>:<segNN>` | Post-processing of a segment failed (for example `container_missing`, `probe_failed`, `remux_failed`, `extract_failed:<role>`, `verify_failed:<role>`); the OBS original is kept if it exists |
+| `integrity:file_missing:<file>` | A listed file was missing when the checksums were written; it was removed from the list |
+| `integrity:encryption_failed` | `age` encryption failed; the plaintext file was kept |
+| `hook:not_found`, `hook:error`, `hook:timeout`, `hook:failed:exit_<code>` | The `on_session_complete` hook failed (`docs/hooks.md`) |
+| `import:time_from_mtime`, `import:metadata_not_stripped` | Import: start time from the file time; tags could not be removed losslessly (`docs/import-devices.md`) |
+
 ## 9. Security model
 
 - obs-websocket: auth always on, a random ≥ 32-char password in the keyring, and the client
@@ -202,7 +230,9 @@ and updated at every state change.
   (`doctor` check).
 - IPC: user-only socket or pipe plus authkey file (0600 / user ACL).
 - Hooks: argv lists, placeholders substituted as whole arguments, no shell, timeout.
-- No network use beyond the above (proven in stage 13).
+- OBS itself fetches streaming-service lists at every start (`rtmp-services`, PF-023, L-19);
+  no recording data is sent.
+- No network use by the agent beyond the above (R-26, checked by end-to-end scenario E10).
 
 ## 10. Non-goals (v1)
 

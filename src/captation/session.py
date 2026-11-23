@@ -1,4 +1,4 @@
-"""Session state machine, pure and deterministic (architecture §6, stage 08).
+"""Session state machine, pure and deterministic (architecture §6).
 
 The machine consumes events and returns commands. It performs no I/O: time comes from an
 injected ``Clock``, session IDs from an injected ``IdFactory``, and every side effect (OBS,
@@ -49,6 +49,7 @@ SessionStatus = Literal["recording", "complete", "interrupted", "cancelled", "fa
 DisarmReason = Literal["user", "auto"]
 
 MAX_SEGMENTS = 99  # session.schema.json: segment index 1..99
+MAX_RECOVERIES = 3  # automatic restarts per session after OBS was lost or stopped on its own
 
 
 class State(enum.Enum):
@@ -138,7 +139,9 @@ class ManualStop:
 
 @dataclass(frozen=True)
 class ObsLost:
-    pass
+    """OBS went away (``lost``) or stopped recording on its own (``stopped``)."""
+
+    reason: str = "lost"
 
 
 @dataclass(frozen=True)
@@ -148,12 +151,34 @@ class ObsBack:
 
 @dataclass(frozen=True)
 class LowDisk:
-    """Free space is below ``storage.min_free_gb``."""
+    """Free space is below ``storage.min_free_gb``.
+
+    ``quiet`` marks a repeated report of the same low-disk episode: it still refuses starts and
+    stops recordings, but does not notify again while idle.
+    """
+
+    quiet: bool = False
 
 
 @dataclass(frozen=True)
 class CountdownElapsed:
     pass
+
+
+@dataclass(frozen=True)
+class CountdownShown:
+    """The executor confirmed that the countdown (with *Cancel*) is visible to the user.
+
+    Fail-closed (principles §2.4): without this confirmation a countdown never turns into a
+    recording; it is cancelled when its deadline passes.
+    """
+
+    session_id: str
+
+
+@dataclass(frozen=True)
+class StartFailed:
+    """OBS refused to start the segment for a reason other than a lost connection."""
 
 
 @dataclass(frozen=True)
@@ -179,6 +204,8 @@ Event = (
     | ObsBack
     | LowDisk
     | CountdownElapsed
+    | CountdownShown
+    | StartFailed
     | SegmentStopped
     | PostprocessDone
 )
@@ -283,7 +310,8 @@ class ShowReminder:
 
 @dataclass(frozen=True)
 class Notify:
-    """One-off notification. Kinds: auto_disarmed, low_disk, obs_lost, start_cancelled."""
+    """One-off notification. Kinds: auto_disarmed, low_disk, obs_lost, recording_stopped,
+    start_cancelled, start_failed, countdown_failed."""
 
     kind: str
 
@@ -314,9 +342,12 @@ _LIVE_STATES = frozenset({State.RECORDING, State.PENDING_STOP, State.STOPPING, S
 class _Session:
     session_id: str
     app_id: str
+    pid: int | None = None  # process of the call; a title change of the same process keeps it
     segment: int = 0  # index of the latest started segment; 0 = none yet
     segment_mode: Mode | None = None
     interrupted: bool = False
+    failed: bool = False
+    recoveries: int = 0
     recording_since: float | None = None
 
 
@@ -339,6 +370,7 @@ class SessionMachine:
         self._pending_since = 0.0
         self._countdown_deadline = 0.0
         self._countdown_elapsed = False
+        self._countdown_shown = False
         self._lost_since: float | None = None
         self._session: _Session | None = None
         self._suppressed: str | None = None
@@ -418,17 +450,27 @@ class SessionMachine:
             case ManualStop():
                 self._on_manual_stop(out)
             case ObsLost():
-                self._on_obs_lost(out)
+                self._on_obs_lost(event.reason, out)
             case ObsBack():
                 self._on_obs_back(out)
             case LowDisk():
-                self._on_low_disk(out)
+                self._on_low_disk(event.quiet, out)
             case CountdownElapsed():
                 if self._state is State.COUNTDOWN:
                     self._countdown_elapsed = True
+            case CountdownShown():
+                s = self._session
+                live = self._state is State.COUNTDOWN and s is not None
+                if live and s is not None and s.session_id == event.session_id:
+                    self._countdown_shown = True
+            case StartFailed():
+                self._on_start_failed(out)
             case SegmentStopped():
                 if self._state is State.STOPPING:
                     self._on_segment_stopped(event.ok, out)
+                elif not event.ok and self._session is not None:
+                    # A stop during an audio→video upgrade failed: the session is incomplete.
+                    self._session.interrupted = True
             case PostprocessDone():
                 if self._state is State.POSTPROCESSING:
                     self._on_postprocess_done(event.ok, out)
@@ -483,22 +525,36 @@ class SessionMachine:
             self._suppress(self._live().app_id)
             self._begin_postprocess(out)
 
-    def _on_obs_lost(self, out: list[Command]) -> None:
-        self._obs_up = False
+    def _on_obs_lost(self, reason: str, out: list[Command]) -> None:
+        kind = "recording_stopped" if reason == "stopped" else "obs_lost"
+        if reason != "stopped":
+            self._obs_up = False
         st = self._state
         if st in (State.RECORDING, State.PENDING_STOP):
             self._mark_interrupted(out)
-            out.append(Notify("obs_lost"))
+            out.append(Notify(kind))
             self._state = State.ERROR
             self._lost_since = None
         elif st is State.STOPPING:
             self._mark_interrupted(out)
-            out.append(Notify("obs_lost"))
+            out.append(Notify(kind))
             self._begin_postprocess(out)
-        elif st is State.COUNTDOWN:
+        elif st is State.COUNTDOWN and reason != "stopped":
             self._abort_countdown(out)
-            out.append(Notify("obs_lost"))
+            out.append(Notify(kind))
             self._state = State.ARMED_IDLE
+
+    def _on_start_failed(self, out: list[Command]) -> None:
+        """A deterministic start failure: finalise as failed once, no retry storm."""
+        if self._state not in (State.RECORDING, State.PENDING_STOP, State.ERROR):
+            return
+        s = self._live()
+        s.failed = True
+        self._suppress(s.app_id)
+        self._mark_interrupted(out)
+        out.append(Notify("start_failed"))
+        out.append(Teardown())
+        self._begin_postprocess(out)
 
     def _on_obs_back(self, out: list[Command]) -> None:
         self._obs_up = True
@@ -506,7 +562,14 @@ class SessionMachine:
             return
         s = self._live()
         ctx = self._ctx
-        if ctx is not None and ctx.app_id == s.app_id and s.segment < MAX_SEGMENTS:
+        if s.recoveries >= MAX_RECOVERIES:
+            # OBS keeps failing: finalise once instead of restarting forever.
+            self._suppress(s.app_id)
+            out.append(Notify("start_failed"))
+            out.append(Teardown())
+            self._begin_postprocess(out)
+        elif ctx is not None and self._same_call(s, ctx) and s.segment < MAX_SEGMENTS:
+            s.recoveries += 1
             self._state = State.RECORDING
             mode = self._wanted_mode(s, ctx)
             self._start_segment(mode, ctx.capture_target, "recovery:obs_restart", out)
@@ -514,7 +577,7 @@ class SessionMachine:
             out.append(Teardown())
             self._begin_postprocess(out)
 
-    def _on_low_disk(self, out: list[Command]) -> None:
+    def _on_low_disk(self, quiet: bool, out: list[Command]) -> None:
         st = self._state
         if st is State.PENDING_START:
             self._suppress(self._pending_app)
@@ -531,6 +594,8 @@ class SessionMachine:
             self._begin_postprocess(out)
         elif st is not State.ARMED_IDLE:
             return  # DISARMED, STOPPING, POSTPROCESSING: nothing to refuse or stop
+        elif quiet:
+            return  # idle and already told about this low-disk episode
         out.append(Notify("low_disk"))
 
     def _on_segment_stopped(self, ok: bool, out: list[Command]) -> None:
@@ -541,7 +606,7 @@ class SessionMachine:
     def _on_postprocess_done(self, ok: bool, out: list[Command]) -> None:
         s = self._live()
         status: SessionStatus
-        if not ok:
+        if not ok or s.failed:
             status = "failed"
         elif s.interrupted:
             status = "interrupted"
@@ -580,28 +645,26 @@ class SessionMachine:
             self._step_countdown(ctx, now, out)
         elif st is State.RECORDING:
             s = self._live()
-            if ctx is None:
+            if ctx is None or not self._same_call(s, ctx):
+                # The call is gone, or another app took over: both are debounced like a stop,
+                # so a brief flicker (tab switch, a second app opening the mic) costs no audio.
                 self._state = State.PENDING_STOP
                 self._lost_since = now
-            elif ctx.app_id != s.app_id:
-                self._begin_stop(out)
             else:
                 self._maybe_upgrade(s, ctx, out)
         elif st is State.PENDING_STOP:
             s = self._live()
-            if ctx is None:
+            if ctx is None or not self._same_call(s, ctx):
                 lost_since = now if self._lost_since is None else self._lost_since
                 if now - lost_since >= self._p.stop_debounce_s:
                     self._begin_stop(out)
-            elif ctx.app_id != s.app_id:
-                self._begin_stop(out)
             else:
                 self._state = State.RECORDING
                 self._lost_since = None
 
     def _step_countdown(self, ctx: CallContext | None, now: float, out: list[Command]) -> None:
         s = self._live()
-        if ctx is not None and ctx.app_id != s.app_id:
+        if ctx is not None and not self._same_call(s, ctx):
             # A different app became the context: this countdown named the wrong app.
             self._abort_countdown(out)
             self._state = State.ARMED_IDLE
@@ -618,6 +681,12 @@ class SessionMachine:
             if lost_too_long or elapsed:
                 self._abort_countdown(out)
                 self._state = State.ARMED_IDLE
+        elif elapsed and not self._countdown_shown:
+            # Fail closed: the user never saw a countdown with Cancel, so nothing is recorded.
+            self._suppress(s.app_id)
+            self._abort_countdown(out)
+            out.append(Notify("countdown_failed"))
+            self._state = State.ARMED_IDLE
         elif elapsed:
             self._start_recording(ctx, now, out)
 
@@ -637,6 +706,11 @@ class SessionMachine:
             self._suppressed = None
 
     # ---- building blocks ----------------------------------------------------------------------
+
+    @staticmethod
+    def _same_call(s: _Session, ctx: CallContext) -> bool:
+        """Same app, or the same process under another app ID (a browser tab or title change)."""
+        return ctx.app_id == s.app_id or (s.pid is not None and ctx.pid == s.pid)
 
     def _live(self) -> _Session:
         s = self._session
@@ -658,11 +732,12 @@ class SessionMachine:
     def _begin_countdown(self, ctx: CallContext, now: float, out: list[Command]) -> None:
         wall = self._clock.wall()
         sid = self._ids.new_session_id(wall)
-        self._session = _Session(session_id=sid, app_id=ctx.app_id)
+        self._session = _Session(session_id=sid, app_id=ctx.app_id, pid=ctx.pid)
         out.append(BeginSession(sid, ctx, self._consent_ref, wall))
         out.append(NotifyCountdown(sid, ctx.app_id, self._p.countdown_seconds))
         self._countdown_deadline = now + self._p.countdown_seconds
         self._countdown_elapsed = False
+        self._countdown_shown = False
         self._lost_since = None
         self._state = State.COUNTDOWN
 

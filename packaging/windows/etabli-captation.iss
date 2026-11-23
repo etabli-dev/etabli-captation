@@ -1,4 +1,4 @@
-; Per-user installer for Etabli Captation (stage 11, ADR-005). No administrator rights needed.
+; Per-user installer for Etabli Captation (ADR-005). No administrator rights needed.
 ; OBS Studio is NOT bundled: install it from https://obsproject.com/download
 ;
 ; Built by packaging\windows\build.ps1 -Installer (Inno Setup 6.3 or later):

@@ -1,4 +1,4 @@
-"""Windows capture profile: kinds and settings the controller sends to OBS (stage 07)."""
+"""Windows capture profile: kinds and settings the controller sends to OBS."""
 
 from __future__ import annotations
 

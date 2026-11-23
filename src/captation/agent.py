@@ -22,7 +22,8 @@ from typing import Any, Protocol
 from captation import postprocess, session, storage, terms
 from captation.config import Config
 from captation.models import AppRef, EncryptionStatus, Mode
-from captation.obs.client import ObsError
+from captation.obs.client import ObsConnectionError, ObsError
+from captation.obs.client import ObsLost as ObsLostError
 from captation.obs.controller import ObsInfo, PreparedSegment
 from captation.platform.base import CallProbe
 from captation.rules import Rules, classify
@@ -33,6 +34,7 @@ from captation.session import (
     BeginSession,
     Cancel,
     CloseCountdown,
+    CountdownShown,
     Disarm,
     Disarmed,
     LowDisk,
@@ -50,6 +52,7 @@ from captation.session import (
     SessionParams,
     SetTrayState,
     ShowReminder,
+    StartFailed,
     StartSegment,
     State,
     StopSegment,
@@ -66,12 +69,22 @@ TRAY_CHECK_S = 10.0
 MAX_CONSENT_REF = 64  # session.schema.json consent_ref maxLength
 OBS_PID_REFRESH_S = 15.0
 RECOVERY_TIMEOUT_S = 30.0
+RECONNECT_INTERVAL_S = 30.0  # background retries after a recovery gave up (while armed)
+STOP_RETRY_INTERVAL_S = 5.0  # retries while OBS keeps recording after a failed stop
 NOTICE_KINDS = {
     "auto_disarmed": ("disarmed.title", "auto_disarmed.body"),
     "low_disk": ("refused.title", "notify.low_disk"),
     "obs_lost": ("app.title", "notify.obs_lost"),
+    "recording_stopped": ("app.title", "notify.recording_stopped"),
     "start_cancelled": ("app.title", "notify.start_cancelled"),
+    "start_failed": ("app.title", "notify.start_failed"),
+    "countdown_failed": ("refused.title", "notify.countdown_failed"),
 }
+
+
+def _connection_problem(exc: BaseException | None) -> bool:
+    """Lost or refused connection (recoverable by reconnecting) vs. a refused request."""
+    return exc is None or isinstance(exc, (ObsConnectionError, ObsLostError, OSError))
 
 
 class ObsDriver(Protocol):
@@ -88,6 +101,8 @@ class ObsDriver(Protocol):
     def teardown_segment(self) -> None: ...
 
     def reset(self) -> None: ...
+
+    def health(self) -> Any: ...
 
     def close(self) -> None: ...
 
@@ -150,6 +165,9 @@ class Agent:
         self._encryption_warning: str | None = None
         self._indicator_lost = False
         self._tray_at = 0.0
+        self._obs_lock = threading.RLock()  # one OBS caller at a time (loop, recovery, IPC)
+        self._workers: list[threading.Thread] = []  # post-processing and finalising
+        self._low_disk = False
         self._tray_seen = True
         self._loop_thread: threading.Thread | None = None
         self._poll_thread: threading.Thread | None = None
@@ -171,9 +189,9 @@ class Agent:
         for cmd in commands:
             try:
                 self._execute(cmd)
-            except Exception:
+            except Exception as exc:
                 log.exception("executor: %s failed", type(cmd).__name__)
-                self._on_command_failed(cmd)
+                self._on_command_failed(cmd, exc)
         idle = self.machine.state in (State.ARMED_IDLE, State.PENDING_START)
         if self._indicator_lost and idle and not self._tray_ok():
             # ADR-014: no new recording without a visible indicator.
@@ -188,13 +206,19 @@ class Agent:
         self._refresh_tray()
         return commands
 
-    def _on_command_failed(self, cmd: Any) -> None:
+    def _on_command_failed(self, cmd: Any, exc: BaseException | None = None) -> None:
         """Feed executor failures back into the state machine (no false indicator)."""
-        if isinstance(cmd, BeginSession):
+        if isinstance(cmd, NotifyCountdown):
+            # Fail closed: without a visible countdown nothing may start (principles §2.4).
+            self.post(Cancel())
+            self.post(Disarm())
+            with contextlib.suppress(Exception):
+                self.d.ui.notice("refused.title", "notify.countdown_failed")
+        elif isinstance(cmd, BeginSession):
             self.d.ui.notice("app.title", "notify.session_failed")
             self.post(Cancel())
         elif isinstance(cmd, StartSegment):
-            self.post(ObsLost())
+            self.post(ObsLost() if _connection_problem(exc) else StartFailed())
         elif isinstance(cmd, StopSegment):
             self.post(SegmentStopped(ok=False))
         elif isinstance(cmd, RunPostprocess):
@@ -225,8 +249,11 @@ class Agent:
     def _exclude_pids(self) -> frozenset[int]:
         now = time.monotonic()
         if now - self._exclude_at > OBS_PID_REFRESH_S:
-            self._exclude = self.d.obs_pids()
             self._exclude_at = now
+            try:
+                self._exclude = self.d.obs_pids()
+            except Exception:
+                log.warning("poll: OBS PIDs unavailable, keeping the last known set")
         return self._exclude
 
     def poll_once(self) -> None:
@@ -253,7 +280,10 @@ class Agent:
         if self.d.free_space_ok is not None and now - self._space_at > FREE_SPACE_CHECK_S:
             self._space_at = now
             if not self.d.free_space_ok():
-                self.post(LowDisk())
+                self.post(LowDisk(quiet=self._low_disk))
+                self._low_disk = True
+            else:
+                self._low_disk = False
 
     def _poll(self) -> None:
         interval = self.cfg.detection.poll_interval_ms / 1000
@@ -262,6 +292,10 @@ class Agent:
                 self.poll_once()
             except Exception:
                 log.exception("poll: probe failed")
+                if self.machine.state is not State.DISARMED:
+                    # Keep the clock running (auto-disarm, stop debounce): a probe that cannot
+                    # see the call counts as "no call", so a recording ends instead of hanging.
+                    self.post(Tick(None))
 
     # ---- arming ----------------------------------------------------------------------------
 
@@ -287,9 +321,10 @@ class Agent:
         )
         if verdict == "block":
             blockers.append("disk_encryption_required")
-        if not blockers and self.cfg.obs.launch_on == "arm":
+        if not blockers and self.cfg.obs.launch_on == "arm" and not self._recovering.locked():
             try:
-                self._obs_info = self.d.obs.ensure_running()
+                with self._obs_lock:
+                    self._obs_info = self.d.obs.ensure_running()
             except Exception:
                 log.warning("arming: OBS unavailable")
                 blockers.append("obs_unavailable")
@@ -313,8 +348,10 @@ class Agent:
         ref = None
         if self.cfg.consent.ask_consent_ref_on_arm:
             ref = self.d.ui.ask_consent_ref()
-            if ref is None and self.cfg.consent.consent_ref_pattern is not None:
-                return  # dialog cancelled
+            if ref is None:
+                # Cancelled, or no dialog available: arming needs the user's explicit answer.
+                log.info("arming from the tray cancelled (no consent reference)")
+                return
         self.arm(ref)
 
     # ---- executor --------------------------------------------------------------------------
@@ -358,6 +395,7 @@ class Agent:
                 return
             level = ui.countdown(cmd.app_id, cmd.seconds)
             log.info("countdown for %s (fallback level %d)", cmd.app_id, level)
+            self.post(CountdownShown(cmd.session_id))
         elif isinstance(cmd, CloseCountdown):
             ui.close_countdown()
         elif isinstance(cmd, BeginSession):
@@ -374,11 +412,14 @@ class Agent:
                     record.end_segment(cmd.index, self._now(), interrupted=True)
         elif isinstance(cmd, Teardown):
             try:
-                self.d.obs.teardown_segment()
+                with self._obs_lock:
+                    self.d.obs.teardown_segment()
             except (ObsError, OSError):
                 log.warning("teardown failed (OBS unreachable)")
         elif isinstance(cmd, RunPostprocess):
-            self._postprocess(cmd.session_id)
+            # Minutes of ffmpeg/QC work: never on the event loop (status, stop and the next
+            # call must stay responsive).
+            self._spawn_worker(self._postprocess, cmd.session_id)
         elif isinstance(cmd, WriteSessionJson):
             self._write_session(cmd)
         elif isinstance(cmd, ShowReminder):
@@ -386,8 +427,12 @@ class Agent:
         elif isinstance(cmd, Notify):
             title, body = NOTICE_KINDS.get(cmd.kind, ("app.title", "app.title"))
             ui.notice(title, body)
-            if cmd.kind == "obs_lost":
-                threading.Thread(target=self._recover_obs, daemon=True).start()
+            if cmd.kind in ("obs_lost", "recording_stopped"):
+                threading.Thread(
+                    target=self._recover_obs, args=(cmd.kind == "obs_lost",), daemon=True
+                ).start()
+            elif cmd.kind == "countdown_failed":
+                self.post(Disarm())
 
     def _tray_ok(self) -> bool:
         """Fresh tray check; a visible tray clears an earlier loss (ADR-014)."""
@@ -397,7 +442,9 @@ class Agent:
         return ok
 
     def _preflight(self) -> str | None:
-        """Checks right before a countdown: visible indicator and exposure rule."""
+        """Checks right before a countdown: acceptance, visible indicator and exposure rule."""
+        if not self.d.terms_accepted():
+            return "terms_not_accepted"
         if not self._tray_ok():
             return "no_tray"
         if self.cfg.obs.exposure_policy == "require_firewall" and not self.d.exposure_ok():
@@ -406,7 +453,8 @@ class Agent:
 
     def _prewarm(self) -> None:
         try:
-            self._obs_info = self.d.obs.ensure_running()
+            with self._obs_lock:
+                self._obs_info = self.d.obs.ensure_running()
         except Exception:
             log.warning("OBS could not be started")
 
@@ -443,29 +491,56 @@ class Agent:
             return
         self._modes[(cmd.session_id, cmd.index)] = cmd.mode
         try:
-            prepared = self.d.obs.prepare_segment(cmd.mode, cmd.target)
-            record.begin_segment(cmd.index, cmd.mode, cmd.trigger, self._now(), prepared.capture)
-            for warning in prepared.warnings:
-                record.add_warning(warning)
-            self.d.obs.start_segment(record.directory, f"seg{cmd.index:02d}_container")
+            with self._obs_lock:
+                prepared = self.d.obs.prepare_segment(cmd.mode, cmd.target)
+                record.begin_segment(
+                    cmd.index, cmd.mode, cmd.trigger, self._now(), prepared.capture
+                )
+                for warning in prepared.warnings:
+                    record.add_warning(warning)
+                self.d.obs.start_segment(record.directory, f"seg{cmd.index:02d}_container")
             log.info("segment %d started (%s, %s)", cmd.index, cmd.mode, cmd.trigger)
         except (ObsError, OSError) as exc:
             log.warning("segment %d could not start: %s", cmd.index, type(exc).__name__)
             if cmd.index not in {s.index for s in record.segments}:
                 record.begin_segment(cmd.index, cmd.mode, cmd.trigger, self._now(), "none")
-            self.post(ObsLost())
+            # A lost connection is recovered; a refusal (user's own recording, missing input
+            # kind, rejected directory) would fail the same way again: finalise once instead.
+            self.post(ObsLost() if _connection_problem(exc) else StartFailed())
 
     def _stop_segment(self, cmd: StopSegment) -> None:
         record = self._records.get(cmd.session_id)
         ok = True
         try:
-            self.d.obs.stop_segment()
+            with self._obs_lock:
+                self.d.obs.stop_segment()
         except (ObsError, OSError) as exc:
             log.warning("segment %d did not stop cleanly: %s", cmd.index, type(exc).__name__)
             ok = False
         if record is not None and cmd.index in {s.index for s in record.segments}:
             record.end_segment(cmd.index, self._now(), interrupted=not ok)
-        self.post(SegmentStopped(ok=ok))
+        if ok or not self._obs_still_recording():
+            self.post(SegmentStopped(ok=ok))
+            return
+        # OBS still records: never finalise or show "disarmed" now. The machine stays in
+        # STOPPING (tray: recording) until OBS really stopped.
+        self.d.ui.notice("app.title", "notify.stop_failed")
+        threading.Thread(target=self._force_stop, daemon=True).start()
+
+    def _obs_still_recording(self) -> bool:
+        try:
+            with self._obs_lock:
+                self.d.obs.reset()
+                return bool(self.d.obs.health().recording)
+        except Exception:
+            return False  # unreachable OBS: the recovery path takes over
+
+    def _force_stop(self) -> None:
+        while not self._stopping.wait(STOP_RETRY_INTERVAL_S):
+            if not self._obs_still_recording():
+                break
+            log.warning("OBS still records after a failed stop; retrying")
+        self.post(SegmentStopped(ok=False))
 
     def _postprocess(self, session_id: str) -> None:
         record = self._records.get(session_id)
@@ -491,41 +566,74 @@ class Agent:
             record.set_ended(self._now())
             record.write()
         else:
-            result = postprocess.finalize_session(
-                record, self.cfg, status=cmd.status, run_hooks=False
-            )
+            # QC, hashing and encryption take minutes on long sessions: off the event loop.
+            self._spawn_worker(self._finalize, cmd.session_id, record, cmd.status)
+            return
+        log.info("session %s finalised: %s", cmd.session_id, cmd.status)
+        del self._records[cmd.session_id]
+
+    def _spawn_worker(self, target: Callable[..., None], *args: Any) -> None:
+        self._workers = [t for t in self._workers if t.is_alive()]
+        worker = threading.Thread(target=target, args=args, daemon=True)
+        worker.start()
+        self._workers.append(worker)
+
+    def wait_for_workers(self, timeout_s: float = 600) -> None:
+        """Block until post-processing and finalising threads are done (shutdown, tests)."""
+        deadline = time.monotonic() + timeout_s
+        for worker in list(self._workers):
+            worker.join(max(0.0, deadline - time.monotonic()))
+
+    def _finalize(self, session_id: str, record: storage.SessionRecord, status: Any) -> None:
+        try:
+            result = postprocess.finalize_session(record, self.cfg, status=status, run_hooks=False)
             if postprocess.hook_due(record, self.cfg):
-                # Hooks may run for hours: never on the event loop (stage 14 review, finding 8).
-                threading.Thread(
-                    target=postprocess.run_session_hook, args=(record, self.cfg), daemon=True
-                ).start()
+                postprocess.run_session_hook(record, self.cfg)  # already off the loop
             if result.qc_warnings:
                 self.d.ui.notice(
                     "app.title", "notify.qc_warning", warnings=", ".join(result.qc_warnings)
                 )
-        log.info("session %s finalised: %s", cmd.session_id, cmd.status)
-        del self._records[cmd.session_id]
+            log.info("session %s finalised: %s", session_id, status)
+        except Exception:
+            log.exception("session %s could not be finalised", session_id)
+            self.d.ui.notice("app.title", "notify.session_failed")
+        finally:
+            self._records.pop(session_id, None)
 
-    def _recover_obs(self) -> None:
+    def _try_reconnect(self, timeout_s: float, *, reconnect: bool = True) -> bool:
+        try:
+            with self._obs_lock:
+                if reconnect:
+                    self.d.obs.close()
+                self._obs_info = self.d.obs.ensure_running(timeout_s=timeout_s)
+                self.d.obs.reset()
+        except Exception:
+            log.warning("OBS recovery attempt failed")
+            return False
+        self.post(ObsBack())
+        return True
+
+    def _recover_obs(self, reconnect: bool = True) -> None:
+        """``reconnect=False``: OBS is still connected but stopped recording on its own."""
         if not self._recovering.acquire(blocking=False):
             return
         try:
             deadline = time.monotonic() + RECOVERY_TIMEOUT_S
             while time.monotonic() < deadline and not self._stopping.is_set():
-                try:
-                    self.d.obs.close()
-                    self._obs_info = self.d.obs.ensure_running(timeout_s=RECOVERY_TIMEOUT_S)
-                    self.d.obs.reset()
-                except Exception:
-                    log.warning("OBS recovery attempt failed")
-                    time.sleep(1)
-                    continue
-                self.post(ObsBack())
-                return
+                if self._try_reconnect(timeout_s=5, reconnect=reconnect):
+                    return
+                reconnect = True  # the cheap path failed: start over with a new connection
+                time.sleep(1)
             log.warning("OBS did not come back within %.0f s", RECOVERY_TIMEOUT_S)
-            if not self._stopping.is_set():
-                # ADR-013: finalise the session as interrupted instead of waiting in ERROR.
-                self.post(ManualStop())
+            if self._stopping.is_set():
+                return
+            # ADR-013: finalise the session as interrupted instead of waiting in ERROR.
+            self.post(ManualStop())
+            # Keep trying in the background while armed, so a late "Run normally" in OBS's
+            # safe-mode dialog brings recording back without re-arming.
+            while not self._stopping.wait(RECONNECT_INTERVAL_S) and self.machine.armed:
+                if self._try_reconnect(timeout_s=5):
+                    return
         finally:
             self._recovering.release()
 
@@ -536,6 +644,11 @@ class Agent:
         self.post(ObsLost())
         if self.machine.state is not State.DISARMED:
             threading.Thread(target=self._recover_obs, daemon=True).start()
+
+    def obs_record_stopped(self) -> None:
+        """Callback: OBS stopped recording without our request (disk full, encoder, Stop)."""
+        if not self._stopping.is_set():
+            self.post(ObsLost(reason="stopped"))
 
     # ---- tray ------------------------------------------------------------------------------
 
@@ -622,7 +735,10 @@ class Agent:
             except Exception:
                 log.exception("shutdown: could not finalise the session")
         self._stopping.set()
-        self.submit(_Stop())
+        try:
+            self.submit(_Stop(), timeout_s=30)
+        except Exception:
+            log.warning("shutdown: event loop did not stop in time")
         self.d.ui.stop()
         with contextlib.suppress(Exception):
             self.d.obs.close()

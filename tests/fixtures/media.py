@@ -1,4 +1,4 @@
-"""Synthetic media and config helpers for the stage 10/13 tests.
+"""Synthetic media and config helpers for the post-processing and import tests.
 
 Everything is generated at test time with ffmpeg ``lavfi`` sources into ``tmp_path``; no media
 fixtures are committed. Decoding for the FFT check happens here (tests only).

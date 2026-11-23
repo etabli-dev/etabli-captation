@@ -11,7 +11,7 @@ from datetime import datetime
 from types import FrameType
 from typing import Any
 
-from captation import ipc, storage
+from captation import ipc, storage, watchdog
 from captation.agent import Agent, AgentDeps
 from captation.config import Config
 from captation.logs import setup_logging
@@ -42,9 +42,17 @@ def build_agent(cfg: Config) -> Agent:
     platform = get_platform()
     rules = load_rules(cfg.detection.rules_file, cfg.detection.user_rules_file)
     holder: dict[str, Agent] = {}
-    controller = manage.make_controller(cfg, on_lost=lambda: holder["agent"].obs_lost())
+    controller = manage.make_controller(
+        cfg,
+        on_lost=lambda: holder["agent"].obs_lost(),
+        on_record_stopped=lambda: holder["agent"].obs_record_stopped(),
+    )
     installation = manage.locate(cfg)
-    probe = platform.probe(exclude_pids=frozenset(), store_titles=cfg.detection.store_window_titles)
+    probe = platform.probe(
+        exclude_pids=frozenset(),
+        store_titles=cfg.detection.store_window_titles,
+        obs_capturing=lambda: controller.recording_expected,
+    )
     encryption = platform.disk_encryption()
     handlers = UiHandlers(
         arm=lambda: holder["agent"].arm_from_tray(),
@@ -88,7 +96,7 @@ def single_instance_lock() -> Any:
     """Hold an exclusive lock for the agent's lifetime (review finding 12)."""
     path = ipc.runtime_dir() / "agent.lock"
     fh = open(path, "a+")  # noqa: SIM115 - kept open while the agent runs
-    if sys.platform == "win32":  # pragma: no cover - Windows (stage 07)
+    if sys.platform == "win32":  # pragma: no cover - Windows
         import msvcrt
 
         try:
@@ -110,19 +118,21 @@ def single_instance_lock() -> Any:
 def recover_after_crash(cfg: Config, agent: Agent) -> None:
     """A previous agent may have died mid-recording: stop a Captation recording still running
     in OBS, remove the Captation inputs and finalise stale sessions (review finding 3)."""
-    now = datetime.now().astimezone()
-    recovered = storage.recover_stale_sessions(cfg, now)
-    if recovered:
-        log.warning("recovered %d stale session(s)", len(recovered))
+    # First stop a recording that may still run, then finalise: hashing a file that OBS is
+    # still writing would make SHA256SUMS wrong.
     if manage.obs_running(cfg):
         try:
             agent.d.obs.ensure_running(timeout_s=10)
             agent.d.obs.reset()
         except Exception:
             log.warning("startup: could not check OBS for a leftover recording")
+    now = datetime.now().astimezone()
+    recovered = storage.recover_stale_sessions(cfg, now)
+    if recovered:
+        log.warning("recovered %d stale session(s)", len(recovered))
 
 
-def run(cfg: Config) -> None:
+def run(cfg: Config, config_path: str | None = None) -> None:
     """Run until SIGTERM/SIGINT. Starts disarmed; a stop finalises a running session."""
     lock = single_instance_lock()
     if agent_running():
@@ -131,6 +141,10 @@ def run(cfg: Config) -> None:
     removed = storage.apply_retention(cfg, datetime.now().astimezone())
     if removed:
         log.info("retention removed %d session(s)", len(removed))
+    from captation.importer import sweep_stale_staging
+
+    if sweep_stale_staging(cfg.data_root_path):
+        log.warning("removed staging folders of interrupted imports")
     agent = build_agent(cfg)
     recover_after_crash(cfg, agent)
     server = ipc.IpcServer(agent.handle_ipc)
@@ -143,10 +157,13 @@ def run(cfg: Config) -> None:
     signal.signal(signal.SIGINT, on_signal)
     agent.start()
     server.start()
+    guard = watchdog.start(config_path)  # stops a recording if this process dies
     try:
         # macOS needs the tray run loop on the main thread; elsewhere this just waits.
         agent.d.ui.backend.run_main_loop(stop)
     finally:
         server.close()
         agent.shutdown()
+        if guard is not None:
+            guard.goodbye()
         lock.close()

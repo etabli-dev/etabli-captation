@@ -1,4 +1,4 @@
-"""End-to-end harness (stage 12): the real agent process, real OBS, real PipeWire probe.
+"""End-to-end harness: the real agent process, real OBS, real PipeWire probe.
 
 Only the desktop shell is stubbed (tray host + notification server on a private D-Bus), and
 audio uses virtual PipeWire nodes, so no real microphone, speaker or camera is touched:
@@ -86,7 +86,7 @@ class Rig:
         raw["recording"]["audio"]["local_input"] = TEST_MIC_DESCRIPTION
         raw["obs"]["websocket"]["password_source"] = "env"
         raw["qc"]["silence_warn_s"] = 5
-        # Test data lives in ~/.cache (unencrypted on the workstation); the product default
+        # Test data lives in ~/.cache (unencrypted on the test machine); the product default
         # "block" (ADR-016) would refuse arming, so the harness opts into "warn".
         raw["storage"]["require_disk_encryption"] = "warn"
         raw["logging"] = {"level": "DEBUG", "dir": str(work / "logs")}

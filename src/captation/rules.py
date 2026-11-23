@@ -1,6 +1,6 @@
 """Detection and mode rules: data model, merging, compiling and classification.
 
-Pure module: no file, process or clock access (stage 08 DoD). Reading rules files lives in
+Pure module: no file, process or clock access . Reading rules files lives in
 ``captation.rulesfile``.
 
 A user rules document is merged into the default one by app ``id``: a user entry replaces the
@@ -13,6 +13,7 @@ the user's ``modes`` replace the defaults.
 
 from __future__ import annotations
 
+import functools
 import re
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
@@ -24,6 +25,30 @@ if TYPE_CHECKING:
     from captation.config import DetectionConfig
 
 UNKNOWN_APP_ID = "unknown"
+WEB_MEETING_APP_ID = "web_meeting"  # detection.extra_meeting_titles
+
+# Window-title normalisation before title rules (browser chrome is not part of the page title).
+_INVISIBLE = re.compile("[\u200b-\u200f\u202a-\u202e\u2060-\u2069\ufeff]")
+_BROWSER_SUFFIX = re.compile(
+    r"\s[-–—]\s(?:[^-–—]+\s[-–—]\s)?"
+    r"(?:Google Chrome|Chromium|Mozilla Firefox|Firefox(?: Developer Edition)?|Nightly"
+    r"|Microsoft Edge|Brave|Vivaldi|Opera|LibreWolf|Zen Browser|Zen|Floorp|Waterfox|Safari"
+    r"|Arc|Web)$"
+)
+
+
+def normalise_title(title: str) -> str:
+    """Drop invisible characters, turn no-break spaces into spaces and cut the browser's own
+    suffix (" - Google Chrome", " — Mozilla Firefox", " - Profile - Microsoft Edge")."""
+    text = _INVISIBLE.sub("", title).replace("\u00a0", " ").strip()
+    return _BROWSER_SUFFIX.sub("", text).strip()
+
+
+@functools.lru_cache(maxsize=32)
+def _compiled(patterns: tuple[str, ...]) -> tuple[re.Pattern[str], ...]:
+    return tuple(re.compile(p) for p in patterns)
+
+
 FALLBACK_MODE: Mode = "audio"
 FALLBACK_REASON = "default"
 
@@ -199,11 +224,12 @@ def _title_upgrade(rule: AppRule, titles: tuple[str, ...]) -> tuple[Category, st
     """
     best: tuple[tuple[int, int, str], TitleRule, str] | None = None
     base_priority = CATEGORY_PRIORITY[rule.category]
+    normalised = [(title, normalise_title(title)) for title in titles]
     for j, trule in enumerate(rule.title_rules):
         if CATEGORY_PRIORITY[trule.category] < base_priority:
             continue
-        for title in titles:
-            if trule.pattern.search(title):
+        for title, clean in normalised:
+            if trule.pattern.search(clean):
                 key = (-CATEGORY_PRIORITY[trule.category], j, title)
                 if best is None or key < best[0]:
                     best = (key, trule, title)
@@ -228,6 +254,13 @@ def _candidates(
             matched = True
             titles = titles_by_pid.get(app.pid, ())
             category, app_id, title = _title_upgrade(rule, titles)
+            if category == "browser" and titles and cfg.extra_meeting_titles:
+                # The user's own meeting pages (a BigBlueButton or Jitsi instance with its own
+                # name, a branded Cisco Meeting Server web app).
+                extra = _compiled(tuple(cfg.extra_meeting_titles))
+                hits = sorted(t for t in titles if any(p.search(normalise_title(t)) for p in extra))
+                if hits:
+                    category, app_id, title = "meeting", WEB_MEETING_APP_ID, hits[0]
             out.append(_Candidate(app, app_id, category, rule.order, title))
         if not matched and cfg.record_unknown_apps:
             out.append(_Candidate(app, UNKNOWN_APP_ID, "unknown", len(rules.apps), None))

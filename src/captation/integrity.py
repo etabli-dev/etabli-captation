@@ -1,4 +1,4 @@
-"""SHA-256 checksums, read-only flags and optional age encryption (stage 10).
+"""SHA-256 checksums, read-only flags and optional age encryption.
 
 Encryption uses the ``age`` command-line tool through a subprocess (argv list, timeout).
 ``pyrage`` is not used because it ships without licence metadata and fails the licence gate.

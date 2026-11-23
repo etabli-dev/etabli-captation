@@ -1,4 +1,4 @@
-"""Session folders, session.json, free-space and disk-encryption policy (stage 10).
+"""Session folders, session.json, free-space and disk-encryption policy.
 
 Layout (architecture §8)::
 
@@ -156,7 +156,7 @@ def has_free_space(path: Path, min_free_gb: float) -> bool:
 
 
 def encryption_verdict(status: EncryptionStatus, policy: EncryptionPolicy) -> EncryptionVerdict:
-    """Disk-encryption policy decision (stage 10, task 2).
+    """Disk-encryption policy decision.
 
     ``off`` → always ok. ``encrypted`` → ok. ``unencrypted`` → ``warn``/``block`` per policy.
     ``unknown`` → ``warn`` under both ``warn`` and ``block`` (we cannot prove it is

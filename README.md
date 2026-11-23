@@ -13,13 +13,23 @@
 > 3. **Before the first use, every user must accept [DISCLAIMER.md](DISCLAIMER.md) by ticking a
 >    checkbox** (`captation accept`). Until then the software does not arm and imports nothing.
 >
-> **Genehmigung vor jeder Nutzung und vor jeder Aufnahme erforderlich.** Jede Nutzung bedarf der
-> vorherigen schriftlichen Genehmigung des Rechteinhabers; jede Aufnahme der vorherigen,
-> dokumentierten Einwilligung aller aufgenommenen Personen (in der Forschung zusätzlich Votum der
-> Ethikkommission und Freigabe durch den Datenschutzbeauftragten). Vor der ersten Nutzung ist der
-> [Haftungsausschluss](DISCLAIMER.md) per Checkbox zu bestätigen.
+> **Genehmigung vor jeder Nutzung und vor jeder Aufnahme erforderlich.**
+>
+> 1. **Jede Nutzung dieser Software bedarf der vorherigen schriftlichen Genehmigung des
+>    Rechteinhabers.** Der Quellcode wird nur zur Transparenz veröffentlicht; die Veröffentlichung
+>    räumt kein Nutzungsrecht ein ([LICENSE](LICENSE)). Genehmigungen und Anfragen:
+>    etabli.dev@outlook.com.
+> 2. **Jede Aufnahme bedarf der vorherigen Zustimmung aller aufgenommenen Personen:** ihrer
+>    informierten, dokumentierten Einwilligung vor der Aufnahme und, in der Forschung, des Votums
+>    der zuständigen Ethikkommission und der Freigabe durch den Datenschutzbeauftragten. Wer
+>    Personen ohne deren Einwilligung aufzeichnet, macht sich in vielen Ländern strafbar (in
+>    Deutschland § 201 StGB).
+> 3. **Vor der ersten Nutzung muss jede Nutzerin und jeder Nutzer den
+>    [Haftungsausschluss](DISCLAIMER.md) per Checkbox bestätigen** (`captation accept`). Bis dahin
+>    lässt sich der Studienmodus nicht aktivieren und es wird nichts importiert.
 
-> Records calls and online meetings through OBS Studio, only while armed and with prior written consent.
+> Records calls and online meetings through OBS Studio for research with the prior written consent
+> of all participants, and only while deliberately armed.
 
 Desktop agent for Linux (macOS and Windows follow) · Source available, all rights reserved · Part of the [Établi Suite](https://github.com/etabli-dev)
 
@@ -27,17 +37,23 @@ Desktop agent for Linux (macOS and Windows follow) · Source available, all righ
 
 ## Status
 
-**Linux: built and tested end to end, not yet released.** macOS and Windows are prepared and
+**Linux: built; the automated end-to-end checks pass with test apps; the real-app checklist and the release are open.** macOS and Windows are prepared and
 need their final steps on those machines (`docs/platform-status.md`, `docs/runbook-macos.md`,
 `docs/runbook-windows.md`). Until a platform's facts are verified there, its release is blocked
-by `tools/check_facts.py --release`. See `CHANGELOG.md`.
+by `tools/check_facts.py --release --os <os>`. See `CHANGELOG.md`.
 
 | Situation | Recording |
 |---|---|
-| Video conference: a meeting app (Zoom, Teams, Webex, Meet/Jitsi/BBB in the browser) **or** any call with the camera on | Video + multitrack audio (mix / remote / local) |
-| Any other call on the computer (iPhone call relayed to the Mac, WhatsApp/Signal Desktop voice, …) | Audio only (multitrack) |
-| Call taken on the iPhone itself | Recorded on mobile hardware (Plaud Note Pro, viaim RecDot, …), then `captation import` |
+| Meeting app: Zoom, Microsoft Teams, Cisco Webex, Jitsi, GoTo, **or** any call with the camera on | Video + multitrack audio (mix / remote / local) |
+| Meeting in a browser: Teams, Zoom, Webex, Google Meet, BigBlueButton, Cisco Meeting Server, Jitsi, … | Video (also when the page cannot be identified; on Linux the approved screen) |
+| Call: FaceTime and iPhone calls on the Mac, Windows Phone Link, Cisco Jabber, softphones | Audio only (multitrack); video when the camera is on |
+| Messenger: WhatsApp, Signal, Telegram, Discord, Slack, Element (app or web) | Audio only (multitrack); video when the camera is on |
+| Any other app that opens the microphone | Audio as `unknown` (`record_unknown_apps`, default on) |
+| Call taken on the iPhone itself | The iPhone cannot run Captation: take the call on the Mac, or record on mobile hardware (Plaud Note Pro, viaim RecDot, …) and `captation import` |
 | Agent **not armed** | Nothing, ever |
+
+Coverage per OS, native and in the browser, and what is still to be confirmed on macOS and
+Windows: [docs/app-coverage.md](docs/app-coverage.md).
 
 ## Contents
 
@@ -77,18 +93,42 @@ uv run python tools/check_facts.py && uv run python tools/licence_gate.py
    Quellcode: `uv sync` und `uv run captation …`.
 3. **GNOME:** Die Erweiterung „AppIndicator“ (Ubuntu: *Ubuntu AppIndicators*) muss aktiv sein –
    ohne Tray-Symbol verweigert Captation den Studienmodus.
-4. **Einrichtung:**
+4. **Haftungsausschluss bestätigen** (Pflicht, vor allem anderen):
    ```
-   captation accept                 # Haftungsausschluss lesen und per Checkbox bestätigen (Pflicht)
+   captation accept                 # Haftungsausschluss lesen und per Checkbox bestätigen
+   ```
+   `install.sh` ruft den Dialog bereits auf; wurde er dort abgebrochen, hier nachholen.
+5. **Konfiguration:** die Beispieldatei kopieren und anpassen, mindestens `data_root` (auf einem
+   **verschlüsselten** Datenträger, z. B. einer LUKS-verschlüsselten Datenpartition) und
+   `project_id`. Die Beispieldatei liegt im Linux-Archiv als `config.example.yaml` (nach
+   `install.sh` auch unter `~/.local/share/etabli-captation/current/`), im Quellcode als
+   `config/config.example.yaml`.
+   ```
+   mkdir -p ~/.config/captation
+   cp ~/.local/share/etabli-captation/current/config.example.yaml ~/.config/captation/config.yaml
+   captation check-config           # prüft die Datei; „ok <Prüfsumme>“ = gültig
+   ```
+   Ohne eigene Datei gelten die eingebauten Voreinstellungen (`data_root: ~/CaptationData`;
+   liegt `data_root` auf einem unverschlüsselten Datenträger, wird der Studienmodus verweigert).
+   Ort der Datei je Betriebssystem:
+
+   | System | Konfigurationsdatei |
+   |---|---|
+   | Linux | `~/.config/captation/config.yaml` (bzw. `$XDG_CONFIG_HOME/captation/config.yaml`) |
+   | macOS | `~/Library/Application Support/captation/config.yaml` |
+   | Windows | `%LOCALAPPDATA%\etabli\captation\config.yaml` |
+6. **OBS und System einrichten:**
+   ```
    captation obs bootstrap          # Profile, Szenensammlung, Websocket-Passwort (im Schlüsselbund)
    captation obs firewall --apply   # sperrt die OBS-Steuerschnittstelle fürs Netzwerk (einmal, sudo)
    captation obs approve-screen     # einmalige Freigabe der Bildschirmaufnahme (Wayland-Dialog)
    captation install-autostart      # startet Captation bei der Anmeldung – immer deaktiviert
    captation doctor                 # prüft alles; 0 = ok, 1 = Hinweise, 2 = Fehler
    ```
-5. **Konfiguration:** `config/config.example.yaml` nach `~/.config/captation/config.yaml`
-   kopieren und anpassen, mindestens `data_root` (auf einem **verschlüsselten** Datenträger,
-   z. B. `/data/CaptationData`) und `project_id`.
+7. **Headset:** ein kabelgebundenes Headset verwenden. Über Lautsprecher gelangen die Stimmen der
+   Gegenseite in die eigene Mikrofonspur (Echo); Bluetooth-Headsets wechseln bei geöffnetem
+   Mikrofon in ein Profil mit deutlich schlechterer Tonqualität. `recording.audio.local_input`
+   muss das Mikrofon sein, das auch die Anruf-App verwendet.
 
 ### 2. Aufnehmen
 
@@ -119,7 +159,7 @@ Dateinamen und Datei-Tags (oft Telefonnummern) werden nicht übernommen.
 
 | Datei | Inhalt |
 |---|---|
-| `session.json` | Metadaten, Warnungen, Prüfsummen |
+| `session.json` | Metadaten, Warnungen (Bedeutung: `specs/architecture.md` §8), Prüfsummen |
 | `segNN_mix.flac`, `segNN_remote.flac`, `segNN_local.flac` | Gesamtmix, Gegenseite, eigenes Mikrofon |
 | `segNN_video.mp4` | Video (nur Videositzungen) |
 | `segNN_audio.mka`, `segNN_container.mkv` | alle Tonspuren zusammen; OBS-Original |

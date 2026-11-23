@@ -6,6 +6,7 @@ OS modules (``linux.py``, ``macos.py``, ``windows.py``) are imported lazily by
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from pathlib import Path
 from typing import Protocol
 
@@ -45,7 +46,13 @@ class PlatformServices(Protocol):
 
     name: str
 
-    def probe(self, *, exclude_pids: frozenset[int], store_titles: bool) -> CallProbe: ...
+    def probe(
+        self,
+        *,
+        exclude_pids: frozenset[int],
+        store_titles: bool,
+        obs_capturing: Callable[[], bool] | None = None,
+    ) -> CallProbe: ...
 
     def autostart(self) -> AutostartManager: ...
 

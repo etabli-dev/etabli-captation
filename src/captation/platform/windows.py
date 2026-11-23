@@ -1,5 +1,5 @@
-"""Windows platform services: OBS locator (stage 03), ConsentStore probe (stage 07),
-Task Scheduler autostart with the AppUserModelID and the BitLocker check (stage 11).
+"""Windows platform services: OBS locator, ConsentStore probe,
+Task Scheduler autostart with the AppUserModelID and the BitLocker check.
 
 Prepared on Linux (ADR-015). Every Windows identifier carries a ``# PF-2xx`` reference to a
 ``pending`` entry in ``docs/platform-facts.md``; the Windows PC verifies them
@@ -255,7 +255,7 @@ def psutil_processes() -> list[ProcInfo]:
     return out
 
 
-# ---- OBS locator (stage 03) ----------------------------------------------------------------------
+# ---- OBS locator ----------------------------------------------------------------------
 
 PROGRAM_FILES_VAR = "ProgramFiles"  # PF-201
 APPDATA_VAR = "APPDATA"  # PF-204
@@ -377,7 +377,7 @@ def obs_host_pids(
     return frozenset(pids)
 
 
-# ---- ConsentStore probe (stage 07) ---------------------------------------------------------------
+# ---- ConsentStore probe ---------------------------------------------------------------
 
 CONSENT_STORE = (
     "Software\\Microsoft\\Windows\\CurrentVersion\\CapabilityAccessManager\\ConsentStore"  # PF-210
@@ -683,7 +683,7 @@ class WindowsProbe:
         return None
 
 
-# ---- disk encryption (stage 10/11) ---------------------------------------------------------------
+# ---- disk encryption ---------------------------------------------------------------
 
 DRIVE_RE = re.compile(r"^[A-Za-z]:$")  # PF-225
 BITLOCKER_SCRIPT = """
@@ -766,7 +766,7 @@ class WindowsDiskEncryption:
         return parse_bitlocker(out.stdout or "")
 
 
-# ---- autostart (stage 11) ------------------------------------------------------------------------
+# ---- autostart ------------------------------------------------------------------------
 
 TASK_NAME = "Etabli Captation"  # PF-220
 TASK_URI = "\\" + TASK_NAME  # PF-220
@@ -870,7 +870,7 @@ def current_user_id(env: Mapping[str, str] | None = None) -> str:
 
 def task_xml(launch: AgentLaunch, user_id: str) -> str:
     """Task Scheduler XML: logon trigger for this user, least privilege, restart on failure
-    3× every minute, battery-independent, no execution time limit (stage 11)."""
+    3× every minute, battery-independent, no execution time limit."""
     return TASK_XML_TEMPLATE.format(
         uri=escape(TASK_URI),
         user=escape(user_id),
@@ -962,7 +962,13 @@ class WindowsPlatform:
     def obs_locator(self, executable: str | None) -> WindowsObsLocator:
         return WindowsObsLocator(executable)
 
-    def probe(self, *, exclude_pids: frozenset[int], store_titles: bool) -> WindowsProbe:
+    def probe(
+        self,
+        *,
+        exclude_pids: frozenset[int],
+        store_titles: bool,
+        obs_capturing: Callable[[], bool] | None = None,
+    ) -> WindowsProbe:
         # Titles are read in memory for classification; store_titles only affects storage.
         return WindowsProbe(exclude_pids=exclude_pids)
 

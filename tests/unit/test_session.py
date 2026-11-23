@@ -16,6 +16,7 @@ import yaml
 
 from captation.config import data_text, parse_config
 from captation.session import (
+    MAX_RECOVERIES,
     MAX_SEGMENTS,
     Arm,
     Armed,
@@ -206,7 +207,8 @@ TABLE: dict[str, tuple[tuple[str, ...], Row]] = {
     ),
     "recording--app-change": (
         ("R-09",),
-        (State.RECORDING, [(1, Tick(WHATSAPP))], STOP, State.STOPPING),
+        # Another app is debounced like a lost call (tab switch, a second app opening the mic).
+        (State.RECORDING, [(1, Tick(WHATSAPP))], [], State.PENDING_STOP),
     ),
     "recording--lost": (
         ("R-10",),
@@ -270,7 +272,11 @@ TABLE: dict[str, tuple[tuple[str, ...], Row]] = {
     ),
     "pending-stop--app-change": (
         ("R-09",),
-        (State.PENDING_STOP, [(1, Tick(WHATSAPP))], STOP, State.STOPPING),
+        (State.PENDING_STOP, [(1, Tick(WHATSAPP))], [], State.PENDING_STOP),
+    ),
+    "pending-stop--app-change-elapsed": (
+        ("R-09",),
+        (State.PENDING_STOP, [(10, Tick(WHATSAPP))], STOP, State.STOPPING),
     ),
     "pending-stop--manual-stop": (
         ("R-37",),
@@ -643,7 +649,9 @@ def test_no_upgrade_without_segments_on_mode_change() -> None:
 @pytest.mark.req("R-09")
 def test_app_change_finalises_and_starts_a_new_session_with_countdown() -> None:
     d = goto(State.RECORDING)
-    assert d.send_s(Tick(WHATSAPP), 1) == STOP
+    assert d.send_s(Tick(WHATSAPP), 1) == []
+    assert d.state is State.PENDING_STOP
+    assert d.send_s(Tick(WHATSAPP), 10) == STOP
     d.send(Tick(WHATSAPP), 1)
     d.send(SegmentStopped(), 1)
     assert d.send_s(PostprocessDone(), 1) == ["WriteSessionJson(complete)"]
@@ -741,16 +749,23 @@ def test_no_countdown_while_obs_is_lost() -> None:
 
 
 @pytest.mark.req("R-53")
-def test_segment_cap_finalises_instead_of_starting_segment_100() -> None:
+@pytest.mark.req("R-53")
+def test_obs_recovery_is_bounded_per_session() -> None:
     d = goto(State.RECORDING)
-    for _ in range(MAX_SEGMENTS - 1):
+    for _ in range(MAX_RECOVERIES):
         d.send(ObsLost(), 1)
-        d.send(ObsBack(), 1)
-    assert d.m.status()["segment"] == MAX_SEGMENTS
-    assert d.send_s(Tick(SIGNAL_VIDEO), 1) == []  # no upgrade beyond the cap
+        assert "StartSegment" in " ".join(d.send_s(ObsBack(), 1))
+    assert d.m.status()["segment"] == 1 + MAX_RECOVERIES
     d.send(ObsLost(), 1)
-    assert d.send_s(ObsBack(), 1) == ["Teardown", "RunPostprocess", "SetTrayState(armed)"]
+    assert d.send_s(ObsBack(), 1) == [
+        "Notify(start_failed)",
+        "Teardown",
+        "RunPostprocess",
+        "SetTrayState(armed)",
+    ]
     assert d.send_s(PostprocessDone(), 1) == ["WriteSessionJson(interrupted)"]
+    assert d.send_s(Tick(SIGNAL), 1) == []  # the failing call is not retried
+    assert MAX_RECOVERIES + 2 <= MAX_SEGMENTS
     check_invariants(log_steps(d))
 
 

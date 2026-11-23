@@ -1,4 +1,4 @@
-"""Track QC: RMS, peak and silence per audio file (stage 10, task 6a).
+"""Track QC: RMS, peak and silence per audio file.
 
 QC never modifies media: the analysis filters (``astats``, ``silencedetect``) write to the
 ``null`` muxer only. This module also holds the small ffmpeg/ffprobe runner shared by
@@ -38,7 +38,7 @@ class ToolError(Exception):
 
 def tool_timeout(duration_s: float | None) -> float:
     """Timeout budget for one ffmpeg pass over media of ``duration_s`` seconds."""
-    # Clamp: a crafted container can declare an absurd duration (stage 14 review, finding 18).
+    # Clamp: a crafted container can declare an absurd duration (release review).
     return _TOOL_BASE_TIMEOUT_S + min(max(0.0, duration_s or 0.0), _TOOL_MAX_MEDIA_S)
 
 

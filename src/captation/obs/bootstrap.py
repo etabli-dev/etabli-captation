@@ -1,4 +1,4 @@
-"""OBS bootstrap (stage 03): websocket config, Captation profiles and scene collection.
+"""OBS bootstrap: websocket config, Captation profiles and scene collection.
 
 Rules (docs/principles.md §4.2): only profiles and collections whose names start with
 ``Captation`` are created or changed. The obs-websocket config is the single exception: it is

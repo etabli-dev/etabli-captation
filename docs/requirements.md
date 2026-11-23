@@ -13,13 +13,13 @@ Test levels: **unit** (no OBS, no OS state), **integration** (`obs` marker, real
 |---|---|---|---|
 | R-01 | A mic user matching a `meeting` app is recorded in **video** mode | §5.5 | unit, e2e (E2) |
 | R-02 | A call in any category while the camera is active is recorded in **video** mode | §5.5 | unit, e2e (E3) |
-| R-03 | Any other recognised call is recorded in **audio** mode | §5.5 | unit, e2e (E1) |
+| R-03 | Any other recognised call is recorded in **audio** mode. A browser holding the microphone without an identifying page title is taken as a meeting and recorded in **video** (ADR-018) | §5.5 | unit, e2e (E1) |
 | R-04 | Category priority is meeting > call > messenger > browser > unknown. Browser title rules may upgrade the category and set the app ID | §5.2 | unit |
 | R-05 | `classify()` is a pure function. Ties break by (a) the running session's app, (b) the camera user, (c) rule order, (d) the lowest PID. Shuffling `mic_users` does not change the result | §5.4 | unit (property) |
-| R-06 | Apps that match no rule are recorded only if `detection.record_unknown_apps` is true | §5.3 | unit |
+| R-06 | Apps that match no rule are recorded only if `detection.record_unknown_apps` is true (the default since ADR-018; countdown, *Cancel* and indicator apply as always) | §5.3 | unit |
 | R-07 | Browser helper and renderer processes are attributed to their parent browser | §3 | unit |
 | R-08 | Camera on during an audio segment starts a new video segment (`upgrade:camera_on`, target gap ≤ 2 s). Mode is never downgraded within a session | §6 | unit, integration, e2e (E3) |
-| R-09 | When a different `app_id` becomes the call context, the current session is finalised and the new app starts a new session with a new countdown | §6 | unit |
+| R-09 | When a different `app_id` stays the call context for `stop_debounce_s`, the current session is finalised and the new app starts a new session with a new countdown. A different app ID of the same process (a browser tab or title change) continues the session (ADR-019) | §6 | unit |
 | R-10 | Recording starts only after the context was stable for `start_debounce_s`, and stops only after it was absent for `stop_debounce_s` | §6 | unit, e2e (E1) |
 
 ## Multitrack audio
@@ -37,13 +37,15 @@ Test levels: **unit** (no OBS, no OS state), **integration** (`obs` marker, real
 | R-14 | Nothing is recorded unless the agent is armed. `consent.require_armed` cannot be set to false | C§2.1 | unit (schema, property), e2e (E4) |
 | R-15 | The agent always starts disarmed. Arming is never persisted across restarts, reboots or crashes | C§2.2 | unit, e2e (E9) |
 | R-16 | Arming expires after `consent.auto_disarm_after_minutes`. Disarming or expiry while recording stops and finalises the session immediately | C§2.3 | unit, e2e (E8) |
-| R-17 | Every recording is preceded by a countdown notification with *Cancel*. A cancelled start writes `status: cancelled` and no media | C§2.4 | unit, e2e (E6) |
+| R-17 | Every recording is preceded by a countdown notification with *Cancel*. A cancelled start writes `status: cancelled` and no media. Fail-closed: a countdown turns into a recording only after the UI confirmed it was shown; otherwise it is cancelled and study mode ends (ADR-019) | C§2.4 | unit, e2e (E6) |
 | R-18 | While recording, a visible indicator (tray state and tooltip) is always shown. No setting can hide it | C§2.5 | unit (schema), manual |
 | R-19 | Right after recording starts, the start reminder (`consent.start_reminder_text`) is shown | C§2.6 | unit, manual |
 | R-20 | A consent reference is entered at arming time and validated against `consent_ref_pattern`. Consent documents are never stored | C§2.7 | unit |
 | R-21 | Tray and notifications are mandatory with the fallback chain notification-with-action → notification + tray cancel → tray blink + sound + tray cancel. Without a tray, arming is refused | C§2.8 | unit, e2e (E13) |
 | R-22 | No pre-roll and no replay buffer. Nothing from before the countdown is kept. The config schema rejects `preroll_seconds` | C§2.9 | unit (schema), grep |
 | R-59 | Before the first use, the current `DISCLAIMER.md` is accepted with an explicit checkbox (`captation accept`: dialog that unlocks the checkbox only after scrolling to the end, or a terminal checkbox; never by a flag or without a TTY). Without a record matching the text's SHA-256, arming (`terms_not_accepted`) and import are refused, and `doctor` reports an error. A changed text must be accepted again | C§2.10, ADR-017 | unit |
+| R-60 | The default rules recognise the meeting, call and messenger apps listed in `docs/app-coverage.md` by process name, macOS bundle ID, Windows package or Linux Flatpak app ID, and the web versions in a browser by normalised page title (Linux: Firefox-family tab title from PipeWire). Ordinary pages that merely mention a service do not count as a meeting. `detection.extra_meeting_titles` adds the user's own meeting pages | ADR-018 | unit |
+| R-61 | If the agent ends without shutting down (crash, kill), a watchdog process stops a recording that runs in a Captation profile and removes the Captation inputs; a recording of the user's own profile is left alone (ADR-019) | C§2.3, C§2.5 | unit |
 
 ## Privacy and data minimisation (docs/principles.md §3)
 
@@ -99,7 +101,7 @@ Test levels: **unit** (no OBS, no OS state), **integration** (`obs` marker, real
 | R-50 | `captation doctor` reports every check with ok/warn/error and a fix; exit code 0/1/2; `--json` | stage 11 | unit, integration |
 | R-51 | The configuration is validated against the packaged schema and pydantic models; unknown keys are errors; runtime code loads only package data | C§8 | unit |
 | R-52 | IPC uses a user-only socket and authkey file. Malformed messages are rejected and logged and never crash the agent | §2 | unit (fuzz) |
-| R-53 | If OBS is lost during recording, the segment is marked interrupted, OBS is relaunched, and a new segment starts if the call is still present (`recovery:obs_restart`) | §6 | unit, e2e (E7) |
+| R-53 | If OBS is lost or stops recording on its own, the segment is marked interrupted, OBS is reconnected or relaunched, and a new segment starts if the call is still present (`recovery:obs_restart`), at most three times per session. A start that OBS refuses for another reason finalises the session once as `failed` without retries. A stop that OBS does not confirm is retried; while OBS still records, the session is not finalised and the indicator stays on (ADR-019) | §6 | unit, e2e (E7) |
 
 ## Mobile import
 

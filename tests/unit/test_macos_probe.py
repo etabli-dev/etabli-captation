@@ -407,7 +407,7 @@ def test_find_helper_order(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> N
 
 @pytest.mark.macos
 def test_real_helper_once() -> None:
-    """On the Mac: the built helper prints one valid object (stage 06 DoD 1)."""
+    """On the Mac: the built helper prints one valid object ."""
     helper = PACKAGE / ".build" / "release" / "captation-probe"
     if not helper.exists():
         pytest.skip("build the helper first: swift build -c release")

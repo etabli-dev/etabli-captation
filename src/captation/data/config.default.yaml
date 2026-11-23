@@ -20,8 +20,9 @@ detection:
   stop_debounce_s: 10
   rules_file: builtin:default
   user_rules_file: null
-  record_unknown_apps: false
+  record_unknown_apps: true          # any other app holding the mic (countdown + Cancel as always)
   store_window_titles: false
+  extra_meeting_titles: []          # regexes for your own meeting pages, e.g. '^Uni-Konferenz - '
 
 recording:
   audio:
@@ -29,7 +30,7 @@ recording:
     codec_preference: [pcm_s24le, flac, aac]
     tracks: { mix: 1, remote: 2, local: 3, external: null }
     local_input: follow_default   # or the exact device name the call apps use
-    external_input_device: null   # e.g. "RØDECaster Duo Main"
+    external_input_device: null   # input name of an external audio interface (see doctor)
   video:
     capture: window_preferred
     fps: 30
@@ -47,7 +48,7 @@ obs:
   profile_audio: Captation-Audio
   profile_video: Captation-Video
   scene_collection: Captation
-  launch_args: []                 # verified flags are added by the launcher (stage 03)
+  launch_args: []                 # verified flags are added by the launcher
   launch_on: arm
   exposure_policy: require_firewall
 

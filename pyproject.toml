@@ -5,6 +5,15 @@ description = "Records calls and online meetings through OBS Studio, only while 
 readme = "README.md"
 requires-python = ">=3.12,<3.13"
 authors = [{ name = "R. Heller" }]
+# Source available, all rights reserved: any use needs prior written approval (LICENSE, ADR-017).
+license = "LicenseRef-Proprietary"
+classifiers = [
+    "Private :: Do Not Upload",
+    "Programming Language :: Python :: 3.12",
+    "Operating System :: POSIX :: Linux",
+    "Operating System :: MacOS",
+    "Operating System :: Microsoft :: Windows",
+]
 dependencies = [
     "pydantic>=2.14",
     "jsonschema>=4.26",

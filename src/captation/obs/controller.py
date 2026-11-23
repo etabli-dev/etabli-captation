@@ -1,4 +1,4 @@
-"""ObsController (stage 04): the only module that drives OBS during recording.
+"""ObsController: the only module that drives OBS during recording.
 
 Per segment: switch profile/scene (only while not recording), create the Captation inputs,
 route tracks, start, stop (waiting for the STOPPED event, PF-014), and remove the inputs again
@@ -7,6 +7,7 @@ so OBS releases the microphone (docs/principles.md §5.2, ADR-010).
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import os
 import threading
@@ -130,6 +131,7 @@ class ObsController:
         launch: Callable[[], None] | None = None,
         token_store: ScreenTokenStore | None = None,
         on_lost: Callable[[], None] | None = None,
+        on_record_stopped: Callable[[], None] | None = None,
     ) -> None:
         self.cfg = cfg
         self._connect = connect
@@ -138,6 +140,8 @@ class ObsController:
         self._launch = launch
         self._tokens = token_store
         self._on_lost = on_lost
+        self._on_record_stopped = on_record_stopped
+        self._stopping = False
         self._t: Transport | None = None
         self._rec = _RecordState()
         self._kinds: set[str] = set()
@@ -147,6 +151,11 @@ class ObsController:
 
     # ---- connection --------------------------------------------------------------------
 
+    @property
+    def recording_expected(self) -> bool:
+        """True between a confirmed StartRecord and our own StopRecord."""
+        return self._recording_expected
+
     def _event(self, event_type: str, data: dict[str, Any]) -> None:
         if event_type == "RecordStateChanged":
             with self._rec.changed:
@@ -154,6 +163,13 @@ class ObsController:
                 if data.get("outputPath"):
                     self._rec.path = data["outputPath"]
                 self._rec.changed.notify_all()
+            stopped = data.get("outputState") == STATE_STOPPED
+            if stopped and self._recording_expected and not self._stopping:
+                # Disk full, encoder error or the Stop button in OBS: not our stop.
+                log.warning("obs: recording stopped without a stop request")
+                self._recording_expected = False
+                if self._on_record_stopped is not None:
+                    self._on_record_stopped()
         elif event_type in ("ExitStarted", "ConnectionLost"):
             log.warning("obs: %s", event_type)
             with self._rec.changed:
@@ -193,6 +209,13 @@ class ObsController:
         for name in (self.cfg.obs.profile_audio, self.cfg.obs.profile_video):
             if name not in profiles:
                 raise ObsError(f"profile {name} missing: run `captation obs bootstrap`")
+        try:
+            if not t.request("GetRecordStatus").get("outputActive"):
+                # A crash can leave Captation inputs in the saved collection; they would hold
+                # the microphone while idle (principles §5.2).
+                self._remove_leftovers()
+        except ObsError:
+            log.warning("obs: could not check for leftover Captation inputs")
         return self._info
 
     @property
@@ -445,6 +468,8 @@ class ObsController:
         else:
             self._set_and_verify(kinds.P_REC_PATH, directory)
         self._set_and_verify(kinds.P_FILENAME_FORMAT, basename)
+        # The track mask follows the config even if it changed after bootstrap.
+        self._set_and_verify(kinds.P_REC_TRACKS, str(self._track_mask()))
         with self._rec.changed:
             self._rec.state = None
             self._rec.path = None
@@ -452,9 +477,33 @@ class ObsController:
         self._recording_expected = True
         self._wait_state(STATE_STARTED, 15)
 
+    def _track_mask(self) -> int:
+        tracks = self.cfg.recording.audio.tracks
+        numbers = [tracks.mix, tracks.remote, tracks.local]
+        if tracks.external is not None:
+            numbers.append(tracks.external)
+        return sum(1 << (n - 1) for n in numbers)
+
     def stop_segment(self, timeout_s: float = 20) -> Path:
-        self._req("StopRecord")
-        self._wait_state(STATE_STOPPED, timeout_s)
+        """Stop and confirm. An unconfirmed stop is checked and retried once; if OBS still
+        records afterwards this raises, and the caller must not finalise the session."""
+        self._stopping = True
+        try:
+            self._req("StopRecord")
+            try:
+                self._wait_state(STATE_STOPPED, timeout_s)
+            except ObsLost:
+                raise
+            except ObsError as exc:
+                if not self._req("GetRecordStatus").get("outputActive"):
+                    msg = f"{exc} (no stop event; OBS reports the recording stopped)"
+                    raise ObsError(msg) from exc
+                log.warning("obs: stop not confirmed, retrying")
+                with contextlib.suppress(ObsRequestError):
+                    self._req("StopRecord")
+                self._wait_state(STATE_STOPPED, timeout_s)
+        finally:
+            self._stopping = False
         self._recording_expected = False
         path = Path(self._rec.path or "")
         if not path.is_file() or path.stat().st_size == 0:
@@ -497,7 +546,7 @@ class ObsController:
         if screen_kind is None or self._tokens is None or not self._cap.needs_screen_token:
             return False
         R = self._req
-        self._ensure_idle()  # never while a recording runs (stage 14 review, finding 15)
+        self._ensure_idle()  # never while a recording runs (release review)
         self._ensure_collection()
         self._switch_profile(self.cfg.obs.profile_video)
         self._remove_leftovers()

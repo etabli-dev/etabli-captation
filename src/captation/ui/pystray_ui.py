@@ -96,7 +96,8 @@ class PystrayUi:
                 self._tooltip,
                 menu=self._pystray_menu(),
             )
-            self._tray_ok = True
+            # Not yet visible: only the main loop shows the icon (run_main_loop).
+            self._tray_ok = False
         except Exception:
             log.warning("tray: pystray unavailable")
             self._tray_ok = False
@@ -216,12 +217,21 @@ class PystrayUi:
 
         def watcher(icon: Any) -> None:
             icon.visible = True
+            self._set_tray(bool(getattr(icon, "visible", True)))
             stop.wait()
+            self._set_tray(False)
             icon.stop()
 
         self._icon.run(
             setup=lambda icon: threading.Thread(target=watcher, args=(icon,), daemon=True).start()
         )
+
+    def _set_tray(self, ok: bool) -> None:
+        changed = ok != self._tray_ok
+        self._tray_ok = ok
+        if changed and self._on_tray_change is not None:
+            with contextlib.suppress(Exception):
+                self._on_tray_change(ok)
 
     def stop(self) -> None:
         if self._icon is not None:

@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import platform
 import re
+import time
 from datetime import date
 from pathlib import Path
 from typing import Any
@@ -46,8 +47,26 @@ def available_encoders(config_dir: Path) -> dict[str, set[str]]:
     return result
 
 
-def collect(ws: ObsWebSocket, config_dir: Path) -> dict[str, Any]:
+def _use_collection(ws: ObsWebSocket, name: str, timeout_s: float = 15) -> None:
+    """Scratch inputs only ever go into the Captation collection (principles §4.2)."""
     R = ws.request
+    if R("GetSceneCollectionList").get("currentSceneCollectionName") == name:
+        return
+    R("SetCurrentSceneCollection", {"sceneCollectionName": name})
+    deadline = time.monotonic() + timeout_s
+    while time.monotonic() < deadline:
+        if R("GetSceneCollectionList").get("currentSceneCollectionName") == name:
+            return
+        time.sleep(0.25)
+    raise ObsError(f"OBS did not switch to the scene collection {name}")
+
+
+def collect(ws: ObsWebSocket, config_dir: Path, collection: str | None = None) -> dict[str, Any]:
+    R = ws.request
+    if R("GetRecordStatus").get("outputActive"):
+        raise ObsError("OBS is recording: run `captation obs facts` while OBS is idle")
+    if collection is not None:
+        _use_collection(ws, collection)
     version = R("GetVersion")
     facts: dict[str, Any] = {
         "obs_version": version.get("obsVersion"),

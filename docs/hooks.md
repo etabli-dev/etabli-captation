@@ -91,9 +91,10 @@ hooks:
 host name and paths with the real ones. A failed upload is logged and recorded as
 `hook:failed:exit_<code>` in `session.json`; retry by hand with the same command.
 
-## Example 3: copy into a Greffe inbox folder
+## Example 3: copy into a transcription inbox folder
 
-A local folder that Greffe watches. `--archive` keeps the read-only modes and timestamps.
+A local folder that a separate transcription tool watches. `--archive` keeps the read-only modes
+and timestamps.
 
 ```yaml
 hooks:
@@ -101,11 +102,11 @@ hooks:
     - /usr/bin/rsync
     - --archive
     - "{session_dir}"
-    - /home/USER/Greffe/inbox/captation/
+    - /home/USER/transcription-inbox/captation/
   timeout_s: 600
 ```
 
 On macOS use `/usr/bin/rsync` or `/bin/cp -Rp`; on Windows call a script, for example
-`["C:\\Windows\\System32\\robocopy.exe", "{session_dir}", "D:\\Greffe\\inbox\\{session_id}", "/E", "/COPY:DAT"]`
+`["C:\\Windows\\System32\\robocopy.exe", "{session_dir}", "D:\\transcription-inbox\\{session_id}", "/E", "/COPY:DAT"]`
 (robocopy exits with 1 on success with copied files; wrap it in a script that maps exit codes
 below 8 to 0).
