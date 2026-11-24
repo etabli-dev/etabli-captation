@@ -160,8 +160,10 @@ has to be checked on another operating system says what is pending there.
   (idle 2.5–3.3 %; Linux 3.8–4.6 %), with `sck_audio_capture` in desktop mode as remote source,
   so the < 5 % criterion **fails on macOS**. The extra load is most likely ScreenCaptureKit, not
   the 128×72 encode; `replayd` (PF-131) is not included. Video profile (1920×1080, VideoToolbox):
-  14.6–24.2 %. **Open for the stage 03 (macOS) checkpoint:** accept the higher figure on macOS,
-  or measure A and per-app vs desktop SCK audio before deciding.
+  14.6–24.2 %.
+- **Decision (accepted for macOS by the owner, 2026-11-24):** strategy **B** as on Linux; the
+  OBS CPU load of 13–15 % of one core while recording audio (video 15–24 %) is accepted on
+  macOS. The < 5 % target stays for Linux and Windows. A and per-app SCK audio are not measured.
 - **Verify-by:** integration tests, FFT track-mapping unit tests.
 
 ## ADR-010 — Mic release

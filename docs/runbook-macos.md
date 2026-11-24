@@ -201,7 +201,7 @@ tests. Finally `uv run python tools/check_facts.py` (on the Mac) and
 | PF-109 | mic device property | facts dump | `device_id` default `default`, UIDs |
 | PF-110 | `screen_capture` settings | facts dump; a video segment of a Zoom call | `type` 0/1/2; only Zoom windows in the video |
 | PF-111 | encoders | facts dump | `ffmpeg_pcm_s24le`, `obs_x264`, `com.apple.videotoolbox.videoencoder.ave.avc` |
-| PF-112 | strategy B, mic release | §6 recordings, `ffprobe`, `top -l 5 -pid $(pgrep -x OBS)` | 3 PCM tracks + 128×72; CPU < 5 %; mic released |
+| PF-112 | strategy B, mic release | §6 recordings, `ffprobe`, `top -l 5 -pid $(pgrep -x OBS)` | 3 PCM tracks + 128×72; CPU ≈ 13–15 % of one core (accepted for macOS, ADR-009); mic released |
 | PF-113 | CoreAudio process objects | `captation-probe --once` idle and in a call | high confidence, app listed, no TCC prompt |
 | PF-114 | fallback path | `captation-probe --once --force-fallback` in a call | `device_running`, `low`, frontmost app |
 | PF-115 | camera | Photo Booth open/closed + `--once` | `camera_active` true/false |
