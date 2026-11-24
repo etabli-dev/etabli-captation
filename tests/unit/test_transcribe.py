@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import subprocess
+import sys
 import threading
 import time
 from datetime import date, datetime, timedelta
@@ -115,7 +116,7 @@ class FakeTools:
                 float(argv[argv.index("-ss") + 1]),
             )
             return subprocess.CompletedProcess(argv, 0, "", "")
-        if argv[0].endswith("whisper-cli"):
+        if Path(argv[0]).stem == "whisper-cli":
             inputs = [argv[k + 1] for k, a in enumerate(argv) if a == "-f"]
             for chunk in inputs:
                 speaker, start = self.cuts[chunk]
@@ -147,7 +148,7 @@ class FakeTools:
                 }
                 Path(chunk + ".json").write_text(json.dumps(doc), encoding="utf-8")
             return subprocess.CompletedProcess(argv, 0, "", "")
-        assert argv[0].endswith("llama-completion")
+        assert Path(argv[0]).stem == "llama-completion"
         return subprocess.CompletedProcess(
             argv, self.llama_exit, json.dumps(self.llama) + " [end of text]", ""
         )
@@ -162,13 +163,18 @@ def make_cfg(tmp_path: Path, **transcription: Any) -> Config:
         (models / name).write_bytes(b"x")
     bins = tmp_path / "bin"
     bins.mkdir(parents=True, exist_ok=True)
-    for tool in ("whisper-cli", "llama-completion"):  # found on disk; the runner is faked
+    suffix = ".exe" if sys.platform == "win32" else ""
+    for name in ("whisper-cli", "llama-completion"):  # found on disk; the runner is faked
+        tool = name + suffix
         (bins / tool).write_text("#!/bin/sh\nexit 99\n", encoding="utf-8")
         (bins / tool).chmod(0o755)
-    summary = {"llama_bin": str(bins / "llama-completion"), "model": str(models / "llm.gguf")}
+    summary = {
+        "llama_bin": str(bins / ("llama-completion" + suffix)),
+        "model": str(models / "llm.gguf"),
+    }
     summary.update(transcription.pop("summary", {}))
     raw["transcription"] = {
-        "whisper_bin": str(bins / "whisper-cli"),
+        "whisper_bin": str(bins / ("whisper-cli" + suffix)),
         "model": str(models / "w.bin"),
         "vad_model": str(models / "vad.bin"),
         "summary": summary,
@@ -282,7 +288,7 @@ def test_the_users_language_is_used_for_the_other_side(tmp_path: Path) -> None:
     session = make_session(cfg)
     tools = FakeTools()
     run(session, cfg, tools)
-    whisper = [c for c in tools.calls if c[0].endswith("whisper-cli")]
+    whisper = [c for c in tools.calls if Path(c[0]).stem == "whisper-cli"]
     assert "seg01_local" in whisper[0][whisper[0].index("-f") + 1]  # own track first, auto
     assert whisper[0][whisper[0].index("-l") + 1] == "auto"
     assert whisper[1][whisper[1].index("-l") + 1] == "de"  # remote in the detected language
@@ -297,7 +303,7 @@ def test_silent_and_failed_tracks(tmp_path: Path) -> None:
     tracks = {t["speaker"]: t["status"] for t in doc["transcription"]["tracks"]}
     assert tracks == {"local": "ok", "remote": "silent"}  # silence is never sent to Whisper
     assert not any(
-        "seg01_remote" in " ".join(c) for c in tools.calls if c[0].endswith("whisper-cli")
+        "seg01_remote" in " ".join(c) for c in tools.calls if Path(c[0]).stem == "whisper-cli"
     )
     assert doc["status"] == "complete" and {u["speaker"] for u in doc["transcript"]} == {"local"}
     cfg2 = make_cfg(tmp_path / "b")
@@ -326,7 +332,7 @@ def test_long_calls_are_summarised_in_parts(tmp_path: Path) -> None:
         _, doc = run(session, cfg, tools)
     finally:
         WHISPER.update(original)
-    llama_calls = [c for c in tools.calls if c[0].endswith("llama-completion")]
+    llama_calls = [c for c in tools.calls if Path(c[0]).stem == "llama-completion"]
     assert doc["summary"]["parts"] > 1 and len(llama_calls) == doc["summary"]["parts"] + 1
 
 
@@ -630,7 +636,7 @@ def test_stop_ends_a_running_tool(tmp_path: Path, monkeypatch: pytest.MonkeyPatc
 
     def go() -> None:
         try:
-            worker._run_tool(["/bin/sh", "-c", "sleep 30"], 60)
+            worker._run_tool([sys.executable, "-c", "import time; time.sleep(30)"], 60)
         except BaseException as exc:  # _Stopped is a BaseException on purpose
             errors.append(exc)
 
