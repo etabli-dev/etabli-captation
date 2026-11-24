@@ -525,3 +525,8 @@ def test_opening_the_app_opens_the_menu_bar_menu(rig: Rig) -> None:
     rig.backend.can_open_menu = False  # back ends without it: a notice says where the icon is
     rig.agent.handle_ipc({"type": "show"})
     assert "Menüleiste" in rig.backend.notes[-1]["body"]
+
+
+def test_status_reports_notification_capabilities(rig: Rig) -> None:
+    reply = rig.agent.handle_ipc({"type": "status"})
+    assert reply["tray"] is True and reply["notifications"] == ["actions", "body"]

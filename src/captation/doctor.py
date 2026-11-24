@@ -104,6 +104,20 @@ def crash_upload_check(module: object, config_dir: Path) -> Check:
     )
 
 
+def _agent_ui_state() -> tuple[bool, set[str]] | None:
+    """Tray and notification state reported by the running agent; None if none runs."""
+    from captation import ipc
+
+    try:
+        reply = ipc.request({"type": "status"}, timeout_s=3)
+    except ipc.IpcError:
+        return None
+    if not isinstance(reply, dict) or not reply.get("ok") or "tray" not in reply:
+        return None
+    caps = reply.get("notifications")
+    return bool(reply["tray"]), {str(c) for c in caps} if isinstance(caps, list) else set()
+
+
 def run_checks(cfg: Config, *, ui_probe: bool = True) -> list[Check]:
     checks: list[Check] = []
     add = checks.append
@@ -282,8 +296,12 @@ def run_checks(cfg: Config, *, ui_probe: bool = True) -> list[Check]:
             )
         )
 
-    # tray and notifications
-    if ui_probe:
+    # tray and notifications: from the running agent if there is one (its menu-bar item is the
+    # real indicator; on macOS a second item cannot appear without the agent's run loop)
+    agent = _agent_ui_state() if ui_probe else None
+    if agent is not None:
+        tray, caps = agent
+    elif ui_probe:
         from captation.ui.base import default_backend
 
         backend = default_backend()
@@ -295,6 +313,7 @@ def run_checks(cfg: Config, *, ui_probe: bool = True) -> list[Check]:
             tray, caps = False, set()
         finally:
             backend.stop()
+    if ui_probe:
         add(
             Check(
                 "tray",

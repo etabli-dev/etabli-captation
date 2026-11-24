@@ -774,6 +774,7 @@ class Agent:
         if kind == "status":
             st: dict[str, Any] = self.submit(_Query(self.machine.status))
             st["tray"] = self.d.ui.tray_available()
+            st["notifications"] = sorted(self.d.ui.backend.notification_capabilities())
             return {"ok": True, **st}
         event = {"disarm": Disarm(), "stop": ManualStop(), "cancel": Cancel()}[kind]
         self.submit(event)
