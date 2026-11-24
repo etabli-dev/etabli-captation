@@ -16,6 +16,7 @@ from captation.session import (
     CountdownShown,
     Disarm,
     Disarmed,
+    DiscardSession,
     Event,
     MarkSegmentInterrupted,
     Notify,
@@ -228,6 +229,7 @@ def check_invariants(steps: Iterable[tuple[list[Command], State, bool]]) -> None
     countdowns: set[str] = set()  # sessions with a countdown in the current armed period
     cancelled: set[str] = set()
     started: set[str] = set()
+    discarded: set[str] = set()  # ADR-022: media of a start cancelled during the countdown
     open_session: str | None = None
     active: set[tuple[str, int]] = set()
     for cmds, state, armed in steps:
@@ -253,11 +255,14 @@ def check_invariants(steps: Iterable[tuple[list[Command], State, bool]]) -> None
                     | MarkSegmentInterrupted(session_id=sid, index=index)
                 ):
                     active.discard((sid, index))
+                case DiscardSession(session_id=sid):
+                    assert sid == open_session and not active, "discard with an active segment"
+                    discarded.add(sid)
                 case WriteSessionJson(session_id=sid, status=status) if status in FINAL_STATUSES:
                     assert sid == open_session, "final write for a session that is not open"
                     assert not active, "session finalised with an active segment"
                     if status == "cancelled":
-                        assert sid not in started, "cancelled session has media"
+                        assert sid not in started or sid in discarded, "cancelled session has media"
                         cancelled.add(sid)
                     else:
                         assert sid in started

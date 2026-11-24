@@ -75,6 +75,17 @@ FACT_LIST_PROPERTIES = {
 FACT_VALUE_PROPERTIES = frozenset({SCK_AUDIO_TYPE, SCREEN_TYPE})
 
 
+# Bundles whose call audio per-app capture misses (PF-135): FaceTime, the Phone app and the
+# FaceTime/Continuity call service.
+SYSTEM_CALL_AUDIO = frozenset(
+    {
+        "com.apple.avconferenced",  # PF-135
+        "com.apple.FaceTime",  # PF-135
+        "com.apple.mobilephone",  # PF-135
+    }
+)
+
+
 class MacCaptureProfile(CaptureProfile):
     """OBS input kinds and settings builders for macOS (ScreenCaptureKit + CoreAudio)."""
 
@@ -93,8 +104,10 @@ class MacCaptureProfile(CaptureProfile):
     main_display: tuple[str, str] | None = (DISPLAY_CAPTURE, SCREEN_DISPLAY_UUID)
 
     def can_target_app(self, bundle_id: str | None) -> bool:
-        """ScreenCaptureKit targets applications by bundle ID only."""
-        return bool(bundle_id)
+        """ScreenCaptureKit targets applications by bundle ID only. FaceTime and iPhone calls
+        play the other side through a system service that per-app capture does not reach (a
+        silent track, PF-135): they use desktop audio (`remote:desktop_fallback`, ADR-021)."""
+        return bool(bundle_id) and bundle_id not in SYSTEM_CALL_AUDIO
 
     def app_audio_settings(
         self, process_name: str, bundle_id: str | None, exe_path: str | None

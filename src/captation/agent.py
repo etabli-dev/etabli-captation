@@ -11,6 +11,7 @@ import contextlib
 import logging
 import queue
 import re
+import shutil
 import sys
 import threading
 import time
@@ -38,6 +39,7 @@ from captation.session import (
     CountdownShown,
     Disarm,
     Disarmed,
+    DiscardSession,
     LowDisk,
     ManualStop,
     MarkSegmentInterrupted,
@@ -273,7 +275,7 @@ class Agent:
             self.post(ObsLost() if _connection_problem(exc) else StartFailed())
         elif isinstance(cmd, StopSegment):
             self.post(SegmentStopped(ok=False))
-        elif isinstance(cmd, RunPostprocess):
+        elif isinstance(cmd, (RunPostprocess, DiscardSession)):
             self.post(PostprocessDone(ok=False))
         elif isinstance(cmd, WriteSessionJson):
             self.d.ui.notice("app.title", "notify.session_failed")
@@ -462,7 +464,7 @@ class Agent:
                 self.post(Cancel())
                 self.post(Disarm())
                 return
-            level = ui.countdown(cmd.app_id, cmd.seconds)
+            level = ui.countdown(cmd.app_id, cmd.seconds, live=cmd.live)
             log.info("countdown for %s (fallback level %d)", cmd.app_id, level)
             self.post(CountdownShown(cmd.session_id))  # the countdown runs from now on
         elif isinstance(cmd, CloseCountdown):
@@ -485,6 +487,8 @@ class Agent:
                     self.d.obs.teardown_segment()
             except (ObsError, OSError):
                 log.warning("teardown failed (OBS unreachable)")
+        elif isinstance(cmd, DiscardSession):
+            self._discard_media(cmd.session_id)
         elif isinstance(cmd, RunPostprocess):
             # Minutes of ffmpeg/QC work: never on the event loop (status, stop and the next
             # call must stay responsive).
@@ -628,6 +632,28 @@ class Agent:
                     ok = False
         self.post(PostprocessDone(ok=ok))
 
+    def _discard_media(self, session_id: str) -> None:
+        """ADR-022: a start cancelled during the countdown keeps no media. OBS has confirmed
+        the stop; everything but ``session.json`` in the session folder is deleted."""
+        record = self._records.get(session_id)
+        ok = True
+        if record is not None:
+            for path in sorted(record.directory.iterdir()):
+                if path.name == storage.SESSION_FILE:
+                    continue
+                try:
+                    if path.is_dir() and not path.is_symlink():
+                        shutil.rmtree(path)
+                    else:
+                        path.unlink()
+                except OSError:
+                    ok = False
+            if ok:
+                log.info("session %s: start cancelled, media deleted", session_id)
+            else:
+                log.warning("session %s: media of the cancelled start not deleted", session_id)
+        self.post(PostprocessDone(ok=ok))
+
     def _write_session(self, cmd: WriteSessionJson) -> None:
         record = self._records.get(cmd.session_id)
         if record is None:
@@ -729,8 +755,13 @@ class Agent:
     def _refresh_tray(self) -> None:
         st = self.machine.status()
         state_name = str(st["state"])
-        if state_name in ("RECORDING", "PENDING_STOP", "STOPPING", "ERROR"):
-            tray = "recording"
+        if st.get("media_active") or state_name in (
+            "RECORDING",
+            "PENDING_STOP",
+            "STOPPING",
+            "ERROR",
+        ):
+            tray = "recording"  # also during the countdown of ADR-022: OBS records
         elif state_name == "DISARMED":
             tray = "disarmed"
         else:

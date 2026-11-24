@@ -130,12 +130,14 @@ class ConsentUi:
 
     # ---- countdown ------------------------------------------------------------------------
 
-    def countdown(self, app_id: str, seconds: int) -> int:
-        """Show the countdown; returns the fallback level that was used (1–3)."""
+    def countdown(self, app_id: str, seconds: int, *, live: bool = False) -> int:
+        """Show the countdown; returns the fallback level that was used (1–3). ``live``
+        (ADR-022): the recording already runs, *Cancel* deletes it."""
         self.close_countdown()
         caps = self.backend.notification_capabilities()
-        title = self.t("countdown.title", seconds=seconds)
-        body = self.t("countdown.body", app=app_id)
+        suffix = "_live" if live else ""
+        title = self.t(f"countdown.title{suffix}", seconds=seconds)
+        body = self.t(f"countdown.body{suffix}", app=app_id)
         nid: int | None = None
         if "actions" in caps:
             nid = self.backend.notify(

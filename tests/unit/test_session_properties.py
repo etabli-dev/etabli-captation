@@ -29,6 +29,7 @@ from captation.session import (
     CountdownElapsed,
     Disarm,
     Disarmed,
+    DiscardSession,
     Event,
     LowDisk,
     ManualStop,
@@ -152,6 +153,7 @@ params = st.builds(
     auto_disarm_after_minutes=st.sampled_from([5, 240, None]),
     segments_on_mode_change=st.booleans(),
     armed_reminder_minutes=st.sampled_from([15, 240]),
+    record_during_countdown=st.booleans(),
 )
 
 
@@ -192,7 +194,9 @@ def test_never_recording_while_disarmed(p: SessionParams, seq: list[Step]) -> No
         if state in (State.RECORDING, State.PENDING_STOP, State.COUNTDOWN, State.PENDING_START):
             assert armed, f"{state.name} while disarmed"
         if any(isinstance(c, StartSegment) for c in cmds):
-            assert armed and state is State.RECORDING
+            # ADR-022: a start may also happen during the (shown) countdown
+            live = p.record_during_countdown and state is State.COUNTDOWN
+            assert armed and (state is State.RECORDING or live)
 
 
 # ---- 2. at most one active segment ------------------------------------------------------------
@@ -252,7 +256,10 @@ def test_every_segment_is_stopped_and_finalised(p: SessionParams, seq: list[Step
         assert isinstance(final, WriteSessionJson)
         recorded = any(isinstance(c, StartSegment) and c.session_id == sid for c in cmds)
         postprocessed = any(isinstance(c, RunPostprocess) and c.session_id == sid for c in cmds)
-        if recorded:
+        discarded = any(isinstance(c, DiscardSession) and c.session_id == sid for c in cmds)
+        if discarded:  # ADR-022: started during the countdown, then cancelled: media deleted
+            assert recorded and not postprocessed and final.status in ("cancelled", "failed")
+        elif recorded:
             assert final.status in ("complete", "interrupted", "failed") and postprocessed
         else:
             assert final.status == "cancelled" and not postprocessed
@@ -307,7 +314,12 @@ def test_cancelled_countdown_never_starts(p: SessionParams, seq: list[Step]) -> 
         c.session_id for c in cmds if isinstance(c, WriteSessionJson) and c.status == "cancelled"
     }
     started = {c.session_id for c in cmds if isinstance(c, StartSegment)}
-    assert not cancelled & started
+    discarded = {c.session_id for c in cmds if isinstance(c, DiscardSession)}
+    # Classic: a cancelled countdown never starts. ADR-022: it may have recorded during the
+    # countdown, but then its media was deleted (DiscardSession) before the cancelled write.
+    assert not (cancelled & started) - discarded
+    if not p.record_during_countdown:
+        assert not discarded and not cancelled & started
 
 
 # ---- 7. classify is deterministic -------------------------------------------------------------

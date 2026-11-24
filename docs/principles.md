@@ -36,6 +36,9 @@ acceptance of `DISCLAIMER.md` (enforced by the acceptance gate, §2.10).**
    `consent.armed_reminder_minutes` (mandatory then) between calls.
 4. Before each recording, a **countdown notification** (`consent.countdown_seconds`) with
    *Cancel* is shown. A cancelled start produces metadata only (`status: cancelled`) and **no media**.
+   With `consent.record_during_countdown` (owner decision, ADR-022) the recording starts once the
+   countdown is visible, the indicator is red from then on, and *Cancel* (or any other end within
+   the countdown) stops it and **deletes** that media after OBS confirmed the stop.
 5. While recording, a **visible indicator** is always shown (tray icon state and tooltip). There
    is no stealth mode, no option to hide the indicator and no silent mode.
 6. After recording starts, the configurable **start reminder** is shown: state consent verbally,
@@ -45,7 +48,8 @@ acceptance of `DISCLAIMER.md` (enforced by the acceptance gate, §2.10).**
 8. Tray and notifications are **mandatory**. No configuration option may disable the indicator,
    the countdown or the reminder. If the OS blocks notifications, the fallback is a tray state
    change plus a sound and a logged warning. Never start silently.
-9. No pre-roll and no replay buffer. Nothing from before the countdown may ever be kept.
+9. No pre-roll and no replay buffer. Nothing from before the countdown may ever be kept (ADR-022
+   records only from the visible countdown on, never before it).
 10. **Acceptance gate.** The agent does not arm and nothing is imported until the current text of
     `DISCLAIMER.md` has been accepted by the user with an explicit checkbox; a changed text must
     be accepted again.

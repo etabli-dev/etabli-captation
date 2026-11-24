@@ -15,6 +15,7 @@ consent:
   require_armed: true             # cannot be disabled
   auto_disarm_after_minutes: null   # null = until ended (ADR-021); or 5–720 minutes
   armed_reminder_minutes: 240       # reminder while study mode is on (required with null)
+  record_during_countdown: true     # record from the shown countdown; Abbrechen deletes it (ADR-022)
   countdown_seconds: 5
   ask_consent_ref_on_arm: true
   consent_ref_pattern: '^[A-Z0-9-]{3,32}$'
@@ -22,7 +23,7 @@ consent:
 
 detection:
   poll_interval_ms: 1000
-  start_debounce_s: 3
+  start_debounce_s: 1   # seconds a call must last before the countdown (ADR-022)
   stop_debounce_s: 10
   rules_file: builtin:default
   user_rules_file: null

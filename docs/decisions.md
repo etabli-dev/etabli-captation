@@ -385,3 +385,23 @@ Decided by the owner after the macOS audit, for daily use on the build Mac.
 | Release order | **macOS first:** v0.1.0 = macOS after the owner's real-call checks on the Mac; Linux follows after its real-call checklist |
 | Reference system | **macOS 27** (the build Mac), minimum macOS 14; no fallback below 14 (P8 dropped) |
 
+## ADR-022 — Record from the visible countdown on; Cancel deletes (2026-11-24)
+
+- **Context:** with start debounce (3 s), countdown (5 s) and the OBS start, about 9 s of every
+  call were missing. The owner asked for the recording to start at once.
+- **Decision (accepted, owner):** `consent.record_during_countdown: true` (default) and
+  `detection.start_debounce_s: 1`. The recording starts when the countdown with *Abbrechen* is
+  confirmed visible (after the agent's last pre-flight checks), never earlier; the indicator is
+  red from then on (§2.5). The countdown text says that the recording runs and that *Abbrechen*
+  deletes it. When the countdown ends without a cancel, the running segment is kept (no second
+  start, no gap) and the start reminder follows. Every end within the countdown (*Abbrechen*,
+  manual stop, hang-up, another app, disarm, low disk, a countdown that was not shown, a refused
+  start, OBS lost or stopping) stops the segment, waits for OBS to confirm the stop (or for the
+  recovery), deletes every file of the session except `session.json` (`DiscardSession`) and
+  writes `status: cancelled` (`failed` for a refused start). Principles §2.4 and §2.9 amended;
+  `false` restores the previous behaviour.
+- **Consequences:** R-17, L-07; the invariant "a cancelled session has no media" now reads "a
+  cancelled session keeps no media" (checked in the property tests for both modes).
+- **Verify-by:** unit and property tests (both modes, every abort path), agent tests with the
+  fake OBS, the owner's test calls.
+

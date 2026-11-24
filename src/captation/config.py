@@ -45,6 +45,7 @@ class ConsentConfig(_Strict):
     countdown_seconds: int
     auto_disarm_after_minutes: int | None = None
     armed_reminder_minutes: int | None = 240
+    record_during_countdown: bool = True  # ADR-022
     ask_consent_ref_on_arm: bool = True
     consent_ref_pattern: str | None = None
     start_reminder_text: str | None = None

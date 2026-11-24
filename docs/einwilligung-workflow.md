@@ -12,9 +12,11 @@
    `captation arm --ref P-017`. Das Symbol wird gelb. Ohne Zeitlimit (Standard, ADR-021) bleibt er
    an, bis Sie ihn beenden, sich abmelden oder neu starten; alle 4 Stunden erinnert eine
    Mitteilung daran. Mit `consent.auto_disarm_after_minutes` endet er nach der eingestellten Zeit.
-3. **Gespräch beginnen.** Captation erkennt die Anruf-App und zeigt einen **Countdown** mit
-   „Abbrechen“. Wer nicht aufgenommen werden soll, bricht hier ab: dann entsteht keine Aufnahme.
-4. **Rotes Symbol abwarten.** Erst wenn das Symbol rot ist, läuft die Aufnahme.
+3. **Gespräch beginnen.** Captation erkennt die Anruf-App und zeigt „Aufnahme läuft“ mit einem
+   **Countdown** und „Abbrechen“; die Aufnahme läuft ab diesem Moment (ADR-022). Wer nicht
+   aufgenommen werden soll, bricht innerhalb des Countdowns ab: dann wird das bis dahin
+   Aufgenommene gelöscht und es bleibt keine Aufnahme.
+4. **Rotes Symbol beachten.** Solange das Symbol rot ist, läuft die Aufnahme.
 5. **Mündliche Bestätigung** zu Beginn der Aufnahme (siehe Ansagetext unten). Die Erinnerung
    erscheint automatisch.
 6. **Später Hinzukommende** in Gruppengesprächen: brauchen eine eigene Einwilligung – sonst die

@@ -290,5 +290,24 @@ def test_apply_and_remove_commands(tmp_path: Path) -> None:
 
 def test_dispatcher_uses_the_macos_module(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(firewall, "current_os", lambda: "macos")
-    status = firewall.check(4455)  # no artefacts on this machine: refused, nothing executed
-    assert status.method == "pf" and not status.ok
+    seen: list[int] = []
+
+    def fake_check(port: int) -> firewall_macos.FirewallStatus:
+        seen.append(port)
+        return firewall_macos.FirewallStatus(ok=False, method="pf", details=[])
+
+    # The real check reads this machine's pf state (installed on a set-up Mac): stub it.
+    monkeypatch.setattr(firewall_macos, "check", fake_check)
+    status = firewall.check(4455)
+    assert status.method == "pf" and not status.ok and seen == [4455]
+
+
+@pytest.mark.req("R-12")
+def test_facetime_and_phone_calls_use_desktop_audio() -> None:
+    """PF-135: per-app capture of the call service gave a silent remote track (-91 dB)."""
+    from captation.obs.kinds_macos import SYSTEM_CALL_AUDIO
+
+    cap = kinds.capture_profile("macos")
+    for bundle in ("com.apple.avconferenced", "com.apple.FaceTime", "com.apple.mobilephone"):
+        assert bundle in SYSTEM_CALL_AUDIO and not cap.can_target_app(bundle)
+    assert cap.can_target_app("net.whatsapp.WhatsApp")  # captured per app (verified live)

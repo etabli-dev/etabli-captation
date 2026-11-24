@@ -31,6 +31,8 @@ STRINGS: dict[str, dict[str, str]] = {
         "countdown.title": "Aufnahme startet in {seconds} s",
         "countdown.body": "{app} – zum Abbrechen „Abbrechen“ wählen.",
         "countdown.cancel": "Abbrechen",
+        "countdown.title_live": "Aufnahme läuft – {seconds} s zum Abbrechen",
+        "countdown.body_live": "{app} – „Abbrechen“ beendet die Aufnahme und löscht sie.",
         "reminder.title": "Aufnahme läuft",
         "reminder.default": "Aufnahme läuft – bitte die Einwilligung aller Teilnehmenden zu "
         "Beginn mündlich bestätigen lassen.",
@@ -128,6 +130,8 @@ STRINGS: dict[str, dict[str, str]] = {
         "countdown.title": "Recording starts in {seconds} s",
         "countdown.body": "{app} – choose “Cancel” to stop it.",
         "countdown.cancel": "Cancel",
+        "countdown.title_live": "Recording – {seconds} s to cancel",
+        "countdown.body_live": "{app} – “Cancel” stops the recording and deletes it.",
         "reminder.title": "Recording",
         "reminder.default": "Recording – please have every participant confirm their consent "
         "verbally at the start.",

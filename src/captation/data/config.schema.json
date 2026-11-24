@@ -76,6 +76,11 @@
           "default": null,
           "description": "Study mode ends after this many minutes; null = it stays on until it is ended, the agent stops, or the user logs out (ADR-021), with armed_reminder_minutes"
         },
+        "record_during_countdown": {
+          "type": "boolean",
+          "default": true,
+          "description": "Record from the moment the countdown with Cancel is shown; Cancel within the countdown deletes that media (ADR-022). false: recording starts after the countdown"
+        },
         "armed_reminder_minutes": {
           "type": [
             "integer",

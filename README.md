@@ -138,8 +138,9 @@ uv run python tools/check_facts.py && uv run python tools/licence_gate.py
 1. Schriftliche Einwilligung einholen (siehe `docs/einwilligung-workflow.md`).
 2. Studienmodus aktivieren: Tray-Menü **„Studienmodus aktivieren…“** und Referenz eingeben, oder
    `captation arm --ref P-017`. Symbol gelb = bereit.
-3. Anruf starten. Captation zeigt einen **Countdown** mit **„Abbrechen“**. Danach ist das Symbol
-   **rot** – die Aufnahme läuft. Jetzt die Einwilligung mündlich bestätigen lassen.
+3. Anruf starten. Nach etwa einer Sekunde zeigt Captation „Aufnahme läuft“ mit **„Abbrechen“**;
+   das Symbol ist **rot**. „Abbrechen“ innerhalb des Countdowns beendet die Aufnahme und löscht
+   sie (ADR-022). Danach die Einwilligung mündlich bestätigen lassen.
 4. Kamera an während eines Tonanrufs → Captation wechselt automatisch auf Video.
 5. Nach dem Auflegen endet die Aufnahme nach wenigen Sekunden; die Dateien werden geprüft.
 6. **„Studienmodus beenden“** (oder `captation disarm`). Ohne Zeitlimit (Standard, ADR-021)

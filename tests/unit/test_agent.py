@@ -105,9 +105,17 @@ class ScriptedProbe:
         self.closes += 1
 
 
+def classic_cfg(tmp_path: Path, *, live: bool = False) -> Config:
+    """The rig's default: recording starts after the countdown (the tests below describe that
+    sequence); ``live=True`` is the product default of ADR-022 (record during the countdown)."""
+    raw = cfg_with(tmp_path).model_dump(by_alias=True)
+    raw["consent"]["record_during_countdown"] = live
+    return Config.model_validate(raw)
+
+
 class Rig:
     def __init__(self, tmp_path: Path, *, cfg: Config | None = None, **backend_kw: Any) -> None:
-        self.cfg = cfg or cfg_with(tmp_path)
+        self.cfg = cfg or classic_cfg(tmp_path)
         self.clock = FakeClock()
         self.fake_obs = FakeObs()
         self.lost: list[bool] = []
@@ -563,3 +571,75 @@ def test_still_armed_reminder_can_end_study_mode(tmp_path: Path) -> None:
         assert r.state is State.DISARMED
     finally:
         r.close()
+
+
+# ---- ADR-022: recording during the countdown (the product default) ---------------------------
+
+
+@pytest.fixture
+def live_rig(tmp_path: Path) -> Iterator[Rig]:
+    r = Rig(tmp_path, cfg=classic_cfg(tmp_path, live=True))
+    yield r
+    r.close()
+
+
+@pytest.mark.req("R-17", "R-18")
+def test_recording_runs_during_the_countdown_and_is_kept(live_rig: Rig) -> None:
+    rig = live_rig
+    assert rig.cfg.detection.start_debounce_s >= 0
+    arm(rig)
+    _start_call(rig)
+    assert rig.state is State.COUNTDOWN
+    note = rig.backend.notes[-1]
+    assert note["summary"].startswith("Aufnahme läuft") and "löscht" in note["body"]
+    assert "StartRecord" in rig.fake_obs.names()  # recording from the shown countdown on
+    assert rig.backend.states[-1][0] == "recording"  # the indicator is red at once (§2.5)
+    rig.tick(n=6)
+    assert rig.state is State.RECORDING
+    assert rig.fake_obs.names().count("StartRecord") == 1  # no gap, no second start
+    assert "Einwilligung" in rig.backend.notes[-1]["body"]  # start reminder after the countdown
+    rig.probe.mic = ()
+    rig.tick(n=12)
+    rig.agent.wait_for_workers()
+    rig.flush()
+    assert rig.sessions()[0]["status"] == "complete"
+
+
+@pytest.mark.req("R-17", "R-19")
+def test_cancel_during_the_countdown_deletes_the_recording(live_rig: Rig) -> None:
+    rig = live_rig
+    arm(rig)
+    _start_call(rig)
+    assert "StartRecord" in rig.fake_obs.names()
+    rig.backend.notes[-1]["on_action"]("cancel")  # the user clicks "Abbrechen"
+    rig.flush()
+    deadline = time.monotonic() + 5
+    while rig.state is not State.ARMED_IDLE and time.monotonic() < deadline:
+        time.sleep(0.05)
+        rig.flush()
+    assert rig.state is State.ARMED_IDLE
+    assert "StopRecord" in rig.fake_obs.names() and not rig.fake_obs.recording
+    session = rig.sessions()[0]
+    assert session["status"] == "cancelled"
+    folder = next((rig.cfg.data_root_path / "unassigned").glob("S-*"))
+    assert sorted(p.name for p in folder.iterdir()) == ["session.json"]  # no media kept
+    assert not any(n.startswith("Captation") for n in rig.fake_obs.inputs)  # mic released
+    rig.tick(n=20)  # the same call does not restart a countdown
+    assert rig.state is State.ARMED_IDLE
+
+
+@pytest.mark.req("R-17")
+def test_a_countdown_that_cannot_be_shown_records_nothing_even_live(
+    live_rig: Rig, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    rig = live_rig
+
+    def broken(app_id: str, seconds: int, *, live: bool = False) -> int:
+        raise RuntimeError("notification centre gone")
+
+    monkeypatch.setattr(rig.ui, "countdown", broken)
+    arm(rig)
+    _start_call(rig)
+    rig.tick(n=10)
+    assert "StartRecord" not in rig.fake_obs.names()  # recording waits for a shown countdown
+    assert all(s["status"] == "cancelled" for s in rig.sessions())

@@ -88,6 +88,7 @@ class SessionParams:
     auto_disarm_after_minutes: int | None  # None: until ended (ADR-021)
     segments_on_mode_change: bool
     armed_reminder_minutes: int | None = None
+    record_during_countdown: bool = False  # ADR-022: record from the shown countdown on
 
     @classmethod
     def from_config(cls, cfg: Config) -> SessionParams:
@@ -98,6 +99,7 @@ class SessionParams:
             auto_disarm_after_minutes=cfg.consent.auto_disarm_after_minutes,
             segments_on_mode_change=cfg.recording.segments_on_mode_change,
             armed_reminder_minutes=cfg.consent.armed_reminder_minutes,
+            record_during_countdown=cfg.consent.record_during_countdown,
         )
 
 
@@ -253,6 +255,7 @@ class NotifyCountdown:
     session_id: str
     app_id: str
     seconds: int
+    live: bool = False  # ADR-022: the recording runs during the countdown; Cancel deletes it
 
 
 @dataclass(frozen=True)
@@ -302,6 +305,14 @@ class RunPostprocess:
 
 
 @dataclass(frozen=True)
+class DiscardSession:
+    """ADR-022: delete the media of a start that was cancelled during the countdown (after OBS
+    confirmed the stop); then ``PostprocessDone``. Only ``session.json`` stays (cancelled)."""
+
+    session_id: str
+
+
+@dataclass(frozen=True)
 class WriteSessionJson:
     session_id: str
     status: SessionStatus
@@ -334,6 +345,7 @@ Command = (
     | MarkSegmentInterrupted
     | Teardown
     | RunPostprocess
+    | DiscardSession
     | WriteSessionJson
     | ShowReminder
     | Notify
@@ -354,6 +366,8 @@ class _Session:
     recoveries: int = 0
     recording_since: float | None = None
     ending: bool = False  # a stop was requested: the session ends, it never resumes
+    provisional: bool = False  # ADR-022: recording during the countdown, not yet confirmed
+    discard: bool = False  # ADR-022: cancelled during the countdown: media is deleted
 
 
 # ---- the machine ------------------------------------------------------------------------------
@@ -377,6 +391,7 @@ class SessionMachine:
         self._countdown_deadline = 0.0
         self._countdown_elapsed = False
         self._countdown_shown = False
+        self._countdown_ctx: CallContext | None = None
         self._lost_since: float | None = None
         self._session: _Session | None = None
         self._suppressed: str | None = None
@@ -444,6 +459,7 @@ class SessionMachine:
             "armed": self._armed,
             "consent_ref": self._consent_ref,
             "auto_disarm_in_s": auto_disarm_in,
+            "media_active": self._media_active(),
             "session_id": s.session_id if s is not None else None,
             "app_id": app_id,
             "mode": s.segment_mode if s is not None else None,
@@ -484,6 +500,8 @@ class SessionMachine:
                     if not self._countdown_shown:
                         # The full countdown runs from now on (§2.4).
                         self._countdown_deadline = now + self._p.countdown_seconds
+                        self._countdown_shown = True
+                        self._start_provisional(s, now, out)
                     self._countdown_shown = True
             case StartFailed():
                 self._on_start_failed(out)
@@ -529,8 +547,7 @@ class SessionMachine:
         if st in (State.ARMED_IDLE, State.PENDING_START):
             self._state = State.DISARMED
         elif st is State.COUNTDOWN:
-            self._abort_countdown(out)
-            self._state = State.DISARMED
+            self._abort_countdown(out, State.DISARMED)
         elif st in (State.RECORDING, State.PENDING_STOP):
             self._begin_stop(out)
         elif st is State.ERROR:
@@ -572,13 +589,40 @@ class SessionMachine:
             else:
                 self._state = State.ERROR
                 self._lost_since = None
-        elif st is State.COUNTDOWN and reason != "stopped":
-            self._abort_countdown(out)
+        elif st is State.COUNTDOWN and self._live().provisional:
+            # ADR-022: the recording of the countdown is discarded, never resumed.
+            s = self._live()
+            s.provisional = False
+            s.discard = True
+            s.ending = True
+            self._mark_interrupted(out)
+            out.append(CloseCountdown(s.session_id))
             out.append(Notify(kind))
-            self._state = State.ARMED_IDLE
+            if reason == "stopped":
+                self._begin_postprocess(out)  # OBS ended it: the file is final, delete it
+            else:
+                self._state = State.ERROR  # wait for the recovery, then delete
+                self._lost_since = None
+        elif st is State.COUNTDOWN and reason != "stopped":
+            self._abort_countdown(out, State.ARMED_IDLE)
+            out.append(Notify(kind))
 
     def _on_start_failed(self, out: list[Command]) -> None:
         """A deterministic start failure: finalise as failed once, no retry storm."""
+        s0 = self._session
+        if self._state is State.COUNTDOWN and s0 is not None and s0.provisional:
+            # ADR-022: the start during the countdown failed: end it, keep no media.
+            s0.provisional = False
+            s0.failed = True
+            s0.discard = True
+            s0.ending = True
+            self._suppress(s0.app_id)
+            self._mark_interrupted(out)
+            out.append(CloseCountdown(s0.session_id))
+            out.append(Notify("start_failed"))
+            out.append(Teardown())
+            self._begin_postprocess(out)
+            return
         if self._state not in (State.RECORDING, State.PENDING_STOP, State.ERROR):
             return
         s = self._live()
@@ -620,8 +664,7 @@ class SessionMachine:
             self._state = State.ARMED_IDLE
         elif st is State.COUNTDOWN:
             self._suppress(self._live().app_id)
-            self._abort_countdown(out)
-            self._state = State.ARMED_IDLE
+            self._abort_countdown(out, State.ARMED_IDLE)
         elif st in (State.RECORDING, State.PENDING_STOP):
             self._suppress(self._live().app_id)
             self._begin_stop(out)
@@ -647,7 +690,9 @@ class SessionMachine:
     def _on_postprocess_done(self, ok: bool, out: list[Command]) -> None:
         s = self._live()
         status: SessionStatus
-        if not ok or s.failed:
+        if s.discard:  # ADR-022: a start cancelled during the countdown keeps no media
+            status = "failed" if s.failed or not ok else "cancelled"
+        elif not ok or s.failed:
             status = "failed"
         elif s.interrupted:
             status = "interrupted"
@@ -707,8 +752,7 @@ class SessionMachine:
         s = self._live()
         if ctx is not None and not self._same_call(s, ctx):
             # A different app became the context: this countdown named the wrong app.
-            self._abort_countdown(out)
-            self._state = State.ARMED_IDLE
+            self._abort_countdown(out, State.ARMED_IDLE)
             return
         if ctx is None:
             if self._lost_since is None:
@@ -720,14 +764,12 @@ class SessionMachine:
         elapsed = self._countdown_elapsed or now >= self._countdown_deadline
         if ctx is None:
             if lost_too_long or elapsed:
-                self._abort_countdown(out)
-                self._state = State.ARMED_IDLE
+                self._abort_countdown(out, State.ARMED_IDLE)
         elif elapsed and not self._countdown_shown:
             # Fail closed: the user never saw a countdown with Cancel, so nothing is recorded.
             self._suppress(s.app_id)
-            self._abort_countdown(out)
+            self._abort_countdown(out, State.ARMED_IDLE)
             out.append(Notify("countdown_failed"))
-            self._state = State.ARMED_IDLE
         elif elapsed:
             self._start_recording(ctx, now, out)
 
@@ -775,7 +817,9 @@ class SessionMachine:
         sid = self._ids.new_session_id(wall)
         self._session = _Session(session_id=sid, app_id=ctx.app_id, pid=ctx.pid)
         out.append(BeginSession(sid, ctx, self._consent_ref, wall))
-        out.append(NotifyCountdown(sid, ctx.app_id, self._p.countdown_seconds))
+        live = self._p.record_during_countdown
+        out.append(NotifyCountdown(sid, ctx.app_id, self._p.countdown_seconds, live))
+        self._countdown_ctx = ctx
         # Until CountdownShown this is the deadline for showing it (fail closed); CountdownShown
         # restarts it so the participants get the full countdown.
         self._countdown_deadline = now + self._p.countdown_seconds
@@ -784,24 +828,52 @@ class SessionMachine:
         self._lost_since = None
         self._state = State.COUNTDOWN
 
-    def _abort_countdown(self, out: list[Command]) -> None:
-        """End a countdown without media: ``status: cancelled``. The caller sets the state."""
+    def _abort_countdown(self, out: list[Command], then: State) -> None:
+        """End a countdown without media: ``status: cancelled``, then state ``then``. If the
+        recording already runs (ADR-022) it is stopped and its media deleted first (STOPPING →
+        DiscardSession); the state after that follows the armed flag."""
         s = self._live()
         out.append(CloseCountdown(s.session_id))
+        self._lost_since = None
+        if s.provisional:
+            s.provisional = False
+            s.discard = True
+            s.ending = True
+            out.append(StopSegment(s.session_id, s.segment))
+            out.append(Teardown())
+            self._state = State.STOPPING
+            return
         out.append(WriteSessionJson(s.session_id, "cancelled"))
         self._session = None
-        self._lost_since = None
+        self._state = then
 
     def _cancel_countdown_by_user(self, out: list[Command]) -> None:
         self._suppress(self._live().app_id)
-        self._abort_countdown(out)
+        self._abort_countdown(out, State.ARMED_IDLE)
         out.append(Notify("start_cancelled"))
-        self._state = State.ARMED_IDLE
+
+    def _start_provisional(self, s: _Session, now: float, out: list[Command]) -> None:
+        """ADR-022: the countdown with Cancel is visible: record from now on. Cancel within the
+        countdown deletes this media; otherwise it becomes the session's first segment."""
+        if not self._p.record_during_countdown or s.segment != 0 or s.discard:
+            return
+        ctx = self._ctx if self._ctx is not None and self._same_call(s, self._ctx) else None
+        ctx = ctx or self._countdown_ctx
+        if ctx is None:
+            return
+        s.provisional = True
+        s.recording_since = now
+        self._start_segment(ctx.mode, ctx.capture_target, f"rule:{ctx.reason}", out)
 
     def _start_recording(self, ctx: CallContext, now: float, out: list[Command]) -> None:
         s = self._live()
         out.append(CloseCountdown(s.session_id))
         self._state = State.RECORDING
+        if s.provisional:
+            # ADR-022: the countdown ended without Cancel: the running recording is kept.
+            s.provisional = False
+            out.append(ShowReminder(s.session_id))
+            return
         s.recording_since = now
         self._start_segment(ctx.mode, ctx.capture_target, f"rule:{ctx.reason}", out)
         out.append(ShowReminder(s.session_id))
@@ -831,7 +903,8 @@ class SessionMachine:
         self._lost_since = None
 
     def _begin_postprocess(self, out: list[Command]) -> None:
-        out.append(RunPostprocess(self._live().session_id))
+        s = self._live()
+        out.append(DiscardSession(s.session_id) if s.discard else RunPostprocess(s.session_id))
         self._state = State.POSTPROCESSING
 
     def _mark_interrupted(self, out: list[Command]) -> None:
@@ -839,10 +912,18 @@ class SessionMachine:
         s.interrupted = True
         out.append(MarkSegmentInterrupted(s.session_id, s.segment))
 
+    def _media_active(self) -> bool:
+        """OBS may be recording: the indicator shows "recording" (§2.5), also during the
+        countdown of ADR-022."""
+        s = self._session
+        if s is None:
+            return False
+        return self._state in _LIVE_STATES or (self._state is State.COUNTDOWN and s.provisional)
+
     def _sync_tray(self, out: list[Command]) -> None:
         s = self._session
         want: tuple[TrayState, Mode | None, str | None]
-        if self._state in _LIVE_STATES and s is not None:
+        if s is not None and self._media_active():
             want = ("recording", s.segment_mode, s.app_id)
         elif self._armed:
             want = ("armed", None, None)

@@ -37,6 +37,8 @@ from captation.session import (
     SessionMachine,
     SessionParams,
     SetTrayState,
+    ShowReminder,
+    StartFailed,
     StartSegment,
     State,
     Tick,
@@ -800,6 +802,7 @@ def test_status_reports_the_running_session() -> None:
         "armed": True,
         "consent_ref": "CR-001",
         "auto_disarm_in_s": AUTO_DISARM - d.clock.t,
+        "media_active": True,
         "session_id": st["session_id"],
         "app_id": "signal",
         "mode": "audio",
@@ -830,8 +833,10 @@ def test_params_from_config() -> None:
         auto_disarm_after_minutes=cfg.consent.auto_disarm_after_minutes,
         segments_on_mode_change=cfg.recording.segments_on_mode_change,
         armed_reminder_minutes=cfg.consent.armed_reminder_minutes,
+        record_during_countdown=cfg.consent.record_during_countdown,
     )
     assert params.auto_disarm_after_minutes is None and params.armed_reminder_minutes == 240
+    assert params.record_during_countdown is True and params.start_debounce_s == 1
 
 
 def test_zero_start_debounce_reaches_countdown_in_one_tick() -> None:
@@ -933,3 +938,100 @@ def test_time_limit_still_works_without_a_reminder() -> None:
     d.send(Arm("CR-001"))
     d.send(Tick(None), 5 * 60)
     assert not d.m.armed
+
+
+# ---- ADR-022: recording during the countdown ---------------------------------------------------
+
+LIVE = replace(PARAMS, record_during_countdown=True)
+
+
+def _live_countdown(d: Driver) -> list[str]:
+    d.send(Arm("CR-001"))
+    d.send(Tick(ctx()), 1.0)
+    out = d.send_s(Tick(ctx()), PARAMS.start_debounce_s)
+    assert d.state is State.COUNTDOWN
+    return out
+
+
+@pytest.mark.req("R-17", "R-18")
+def test_live_countdown_records_from_the_shown_countdown() -> None:
+    d = Driver(params=LIVE)
+    out = _live_countdown(d)
+    assert any(c.startswith("StartSegment") for c in out)  # the driver confirms "shown" at once
+    assert d.m.status()["media_active"] is True
+    d.send(Tick(ctx()), PARAMS.countdown_seconds)
+    assert d.state is State.RECORDING
+    starts = [c for c in d.commands() if isinstance(c, StartSegment)]
+    assert len(starts) == 1 and starts[0].index == 1  # kept, no second start
+    assert any(isinstance(c, ShowReminder) for c in d.commands())
+    check_invariants(log_steps(d))
+
+
+@pytest.mark.req("R-17", "R-19")
+@pytest.mark.parametrize(
+    "abort",
+    ["cancel", "disarm", "hang_up", "other_app", "low_disk", "manual_stop"],
+)
+def test_live_countdown_aborts_delete_the_media(abort: str) -> None:
+    d = Driver(params=LIVE)
+    _live_countdown(d)
+    event = {
+        "cancel": Cancel(),
+        "disarm": Disarm(),
+        "low_disk": LowDisk(),
+        "manual_stop": ManualStop(),
+        "hang_up": Tick(None),
+        "other_app": Tick(WHATSAPP),
+    }[abort]
+    d.send(event, 1.0)
+    if abort == "hang_up":
+        d.send(Tick(None), PARAMS.stop_debounce_s)
+    assert d.state is State.STOPPING  # OBS must confirm the stop before anything is deleted
+    out = d.send_s(SegmentStopped(ok=True), 1.0)
+    assert any(c.startswith("DiscardSession") for c in out)
+    assert not any(c.startswith("RunPostprocess") for c in out)
+    out = d.send_s(PostprocessDone(ok=True), 1.0)
+    assert "WriteSessionJson(cancelled)" in out
+    if abort == "disarm":
+        assert d.state is State.DISARMED
+    elif abort == "other_app":
+        assert d.state is State.PENDING_START  # the new app's call is offered at once
+    else:
+        assert d.state is State.ARMED_IDLE
+    check_invariants(log_steps(d))
+
+
+@pytest.mark.req("R-17", "R-53")
+def test_live_countdown_obs_loss_waits_for_recovery_then_deletes() -> None:
+    d = Driver(params=LIVE)
+    _live_countdown(d)
+    d.send(ObsLost(), 1.0)
+    assert d.state is State.ERROR and d.m.status()["media_active"] is True
+    out = d.send_s(ObsBack(), 2.0)
+    assert any(c.startswith("DiscardSession") for c in out)
+    assert not any(c.startswith("StartSegment") for c in out)  # never resumed
+    out = d.send_s(PostprocessDone(ok=True), 1.0)
+    assert "WriteSessionJson(cancelled)" in out
+    assert d.state is State.PENDING_START  # the call still runs: it gets a new countdown
+    check_invariants(log_steps(d))
+
+
+@pytest.mark.req("R-17")
+def test_live_countdown_never_records_without_a_shown_countdown() -> None:
+    d = Driver(params=LIVE, ack_countdown=False)
+    _live_countdown(d)
+    out = d.send_s(Tick(ctx()), PARAMS.countdown_seconds)
+    assert "Notify(countdown_failed)" in out
+    assert not any(isinstance(c, StartSegment) for c in d.commands())
+    check_invariants(log_steps(d))
+
+
+@pytest.mark.req("R-17")
+def test_live_countdown_start_failure_ends_once_without_media() -> None:
+    d = Driver(params=LIVE)
+    _live_countdown(d)
+    out = d.send_s(StartFailed(), 0.5)
+    assert "Notify(start_failed)" in out and any(c.startswith("DiscardSession") for c in out)
+    out = d.send_s(PostprocessDone(ok=True), 1.0)
+    assert "WriteSessionJson(failed)" in out
+    check_invariants(log_steps(d))

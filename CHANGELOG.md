@@ -6,6 +6,8 @@ All notable changes are documented here. The format follows
 ## [Unreleased]
 
 ### Fixed
+- macOS: FaceTime and iPhone calls recorded a silent remote track; they use desktop audio now
+  (PF-135).
 - macOS app: notifications never worked in the bundle because `desktop_notifier.resources` was
   not packaged; the agent now also asks for the notification permission at start (PF-126).
 
@@ -21,6 +23,8 @@ All notable changes are documented here. The format follows
 - Unit tests and type checks run on macOS and Windows CI as well (Linux-only modules are skipped).
 
 ### Added
+- Recording starts when the countdown is shown, not after it (ADR-022, default): *Abbrechen*
+  within the countdown stops the recording and deletes it; start debounce 1 s.
 - Study mode without a time limit (ADR-021, now the default): it stays on until it is ended,
   with a reminder and an *end study mode* button every 4 hours between calls
   (`consent.armed_reminder_minutes`); a time limit can still be set.
