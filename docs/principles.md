@@ -30,7 +30,10 @@ acceptance of `DISCLAIMER.md` (enforced by the acceptance gate, §2.10).**
    `consent.require_armed` is `const: true` in the schema.
 2. The agent **always starts disarmed**. Arming is never persisted across agent restarts,
    reboots or crashes.
-3. Arming **expires** after `consent.auto_disarm_after_minutes`.
+3. Arming **expires** after `consent.auto_disarm_after_minutes`. If the owner sets it to `null`
+   (ADR-021), arming stays on until it is ended, the agent stops or the user logs out, and it is
+   never unnoticed: a reminder with *end study mode* appears every
+   `consent.armed_reminder_minutes` (mandatory then) between calls.
 4. Before each recording, a **countdown notification** (`consent.countdown_seconds`) with
    *Cancel* is shown. A cancelled start produces metadata only (`status: cancelled`) and **no media**.
 5. While recording, a **visible indicator** is always shown (tray icon state and tooltip). There

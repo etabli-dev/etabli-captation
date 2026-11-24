@@ -149,8 +149,9 @@ params = st.builds(
     start_debounce_s=st.sampled_from([0.0, 1.0, 3.0]),
     stop_debounce_s=st.sampled_from([2.0, 10.0]),
     countdown_seconds=st.sampled_from([3, 5]),
-    auto_disarm_after_minutes=st.sampled_from([5, 240]),
+    auto_disarm_after_minutes=st.sampled_from([5, 240, None]),
     segments_on_mode_change=st.booleans(),
+    armed_reminder_minutes=st.sampled_from([15, 240]),
 )
 
 

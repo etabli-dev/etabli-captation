@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import threading
+import time
 from collections.abc import Callable, Iterator
 from pathlib import Path
 from typing import Any
@@ -333,11 +334,17 @@ def test_disarm_stops_and_finalises(rig: Rig) -> None:
 
 
 @pytest.mark.req("R-16")
-def test_auto_disarm(rig: Rig) -> None:
-    arm(rig)
-    rig.tick(seconds=60, n=241)
-    assert rig.state is State.DISARMED
-    assert any(n["body"].startswith("Die Zeit ist abgelaufen") for n in rig.backend.notes)
+def test_auto_disarm(tmp_path: Path) -> None:
+    raw = cfg_with(tmp_path).model_dump(by_alias=True)
+    raw["consent"]["auto_disarm_after_minutes"] = 240  # a time limit (default since ADR-021: none)
+    rig = Rig(tmp_path, cfg=Config.model_validate(raw))
+    try:
+        arm(rig)
+        rig.tick(seconds=60, n=241)
+        assert rig.state is State.DISARMED
+        assert any(n["body"].startswith("Die Zeit ist abgelaufen") for n in rig.backend.notes)
+    finally:
+        rig.close()
 
 
 def test_indicator_loss(rig: Rig) -> None:
@@ -530,3 +537,29 @@ def test_opening_the_app_opens_the_menu_bar_menu(rig: Rig) -> None:
 def test_status_reports_notification_capabilities(rig: Rig) -> None:
     reply = rig.agent.handle_ipc({"type": "status"})
     assert reply["tray"] is True and reply["notifications"] == ["actions", "body"]
+
+
+@pytest.mark.req("R-16")
+def test_still_armed_reminder_can_end_study_mode(tmp_path: Path) -> None:
+    """ADR-021: without a time limit a reminder with 'Studienmodus beenden' appears."""
+    raw = cfg_with(tmp_path).model_dump(by_alias=True)
+    raw["consent"]["auto_disarm_after_minutes"] = None
+    raw["consent"]["armed_reminder_minutes"] = 15
+    r = Rig(tmp_path, cfg=Config.model_validate(raw))
+    try:
+        assert arm(r)["ok"] is True
+        assert "bis Sie den Studienmodus beenden" in r.backend.notes[-1]["body"]
+        assert "bis Sie ihn beenden" in r.backend.states[-1][1]
+        r.tick(seconds=60, n=15)
+        note = r.backend.notes[-1]
+        assert note["summary"] == "Studienmodus ist noch aktiv"
+        assert note["actions"] == [("disarm", "Studienmodus beenden")]
+        note["on_action"]("disarm")
+        r.flush()
+        deadline = time.monotonic() + 5
+        while r.state is not State.DISARMED and time.monotonic() < deadline:
+            time.sleep(0.05)
+            r.flush()
+        assert r.state is State.DISARMED
+    finally:
+        r.close()

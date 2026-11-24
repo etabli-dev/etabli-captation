@@ -119,7 +119,9 @@ has to be checked on another operating system says what is pending there.
 - **Decision (accepted, 2026-11-23):** `window_preferred`. Where the window cannot be targeted, display
   capture is used and `session.json` gets a warning (docs/principles.md §3.6). On Linux Wayland, window
   targeting goes through the screencast portal and is not dynamic, so Linux uses the portal
-  source with the warning `capture:display_fallback`.
+  source with the warning `capture:display_fallback`. On macOS ScreenCaptureKit targets the
+  meeting **application** (all its windows; for a browser meeting all windows of that browser);
+  the owner accepted this instead of single-window capture (ADR-021).
 - **Verify-by:** integration and detection checks on Linux (done), macOS and Windows (pending).
 
 ## ADR-012 — Websocket exposure
@@ -248,12 +250,12 @@ Decided by the maintainer once the Linux build was complete.
 | Windows in v1 (ADR-007) | **Full support** |
 | Video capture default (ADR-008) | **`window_preferred`** (meeting window; screen fallback with a warning) |
 | Linux OBS distribution (ADR-006) | **Flatpak** (official OBS build) |
-| Release plan | **v0.1.0 = Linux**, tagged after the Linux real-call checklist of the release checklist; macOS and Windows follow as v0.2.0 once their facts are verified |
+| Release plan | superseded by ADR-021 (macOS first); was: **v0.1.0 = Linux**, tagged after the Linux real-call checklist of the release checklist; macOS and Windows follow as v0.2.0 once their facts are verified |
 | Transcription hook | **None preconfigured**; examples in docs/hooks.md |
 | Tray lost during a recording (ADR-014) | **Continue with a warning**; no new recording until the indicator is back |
-| Auto-disarm | **240 min** (default unchanged) |
+| Auto-disarm | **240 min** (default unchanged); superseded for the owner's use by ADR-021 (no limit, reminder every 4 h) |
 | Project ID of the first deployment | **unassigned** until the study is registered |
-| macOS target | **macOS 26** as the reference system (per-process detection needs ≥ 14) |
+| macOS target | superseded by ADR-021: **macOS 27** (the build Mac); was macOS 26 (per-process detection needs ≥ 14) |
 
 ## ADR-017 — Public, source-available repository; disclaimer and acceptance gate (2026-11-23)
 
@@ -361,3 +363,25 @@ Decided by the maintainer once the Linux build was complete.
 - **Consequences:** R-13, L-04, L-08, PF-132; `follow_default` and device names keep working.
 - **Verify-by:** unit tests (controller, agent, probe parser), probe `swift test`, live check on
   macOS against OBS 33.0.3.
+
+## ADR-021 — Owner decisions for the macOS release (2026-11-24)
+
+Decided by the owner after the macOS audit, for daily use on the build Mac.
+
+| Topic | Decision |
+|---|---|
+| Study mode duration (§2.3) | **No time limit** (`consent.auto_disarm_after_minutes: null`, now the default): study mode stays on until it is ended, the agent stops or the user logs out. Never unnoticed: a reminder with *Studienmodus beenden* every `consent.armed_reminder_minutes` (240), only between calls; the reminder is mandatory without a limit (schema and model). A time limit (5–720 min) can still be set. Every recording keeps the countdown with *Abbrechen*, the red icon and the start reminder |
+| App coverage | **All call apps and browser calls** (ADR-018), including FaceTime and iPhone calls on the Mac; no built-in browser |
+| Browser tab titles on macOS | The agent gets **Screen & System Audio Recording** so the probe reads window titles (in memory only, §3.1): WhatsApp Web voice calls are recorded as audio, meeting pages as video, sessions name the service |
+| Video scope on macOS | **Whole meeting app** (ScreenCaptureKit application capture), not single-window capture |
+| Firewall (ADR-012) | **pf anchor** via a root LaunchDaemon (`captation obs firewall --apply`); no pf-based VPN on the Mac |
+| Remote track of FaceTime/iPhone calls on the Mac | **Desktop-audio fallback accepted** (`remote:desktop_fallback`): the call audio runs in a system service that cannot be captured per app |
+| Consent reference at arming | **Kept** (`ask_consent_ref_on_arm: true`) |
+| Retention | **Never delete automatically** (`retention_days: null`) |
+| Project ID | **`unassigned`** until the study is registered |
+| OBS CPU on macOS (ADR-009) | **13–15 % accepted** |
+| Headsets | Local track follows the call app's microphone (ADR-020) |
+| Signing | **Ad-hoc** while only the owner uses the app; Developer ID and notarisation when it is handed to others |
+| Release order | **macOS first:** v0.1.0 = macOS after the owner's real-call checks on the Mac; Linux follows after its real-call checklist |
+| Reference system | **macOS 27** (the build Mac), minimum macOS 14; no fallback below 14 (P8 dropped) |
+

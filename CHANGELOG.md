@@ -21,6 +21,9 @@ All notable changes are documented here. The format follows
 - Unit tests and type checks run on macOS and Windows CI as well (Linux-only modules are skipped).
 
 ### Added
+- Study mode without a time limit (ADR-021, now the default): it stays on until it is ended,
+  with a reminder and an *end study mode* button every 4 hours between calls
+  (`consent.armed_reminder_minutes`); a time limit can still be set.
 - Background operation on macOS: opening the app while it runs opens its menu-bar menu (reopen
   Apple Event, PF-133); without a running agent, opening the app starts it in the background.
   The LaunchAgent (`install-autostart`) restarts it after a crash (PF-122).

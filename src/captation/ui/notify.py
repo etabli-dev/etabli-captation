@@ -23,6 +23,7 @@ from captation.ui.i18n import GLYPHS, Strings
 log = logging.getLogger(__name__)
 
 CANCEL_ACTION = "cancel"
+DISARM_ACTION = "disarm"
 
 
 @dataclass
@@ -117,6 +118,8 @@ class ConsentUi:
             )
         elif machine_state == "COUNTDOWN":
             body = self.t("tray.countdown", seconds=countdown_s or 0, app=app_id or "?")
+        elif state == "armed" and remaining_s is None:
+            body = self.t("tray.armed_open")  # no time limit (ADR-021)
         elif state == "armed":
             body = self.t("tray.armed", minutes=int((remaining_s or 0) // 60))
         else:
@@ -162,6 +165,25 @@ class ConsentUi:
     def _on_action(self, key: str) -> None:
         if key == CANCEL_ACTION:
             self.handlers.cancel()
+        elif key == DISARM_ACTION:
+            self.handlers.disarm()
+
+    def still_armed(self) -> None:
+        """ADR-021: study mode without a time limit reminds the user regularly, with a button
+        that ends it (the tray menu does the same)."""
+        title, body = self.t("still_armed.title"), self.t("still_armed.body")
+        if "actions" in self.backend.notification_capabilities():
+            nid = self.backend.notify(
+                title,
+                body,
+                actions=[(DISARM_ACTION, self.t("still_armed.end"))],
+                on_action=self._on_action,
+            )
+        else:
+            nid = self.backend.notify(title, body)
+        if nid is None:
+            log.warning("still-armed reminder: notification unavailable, sound instead")
+            self.backend.play_sound()
 
     def close_countdown(self) -> None:
         if self._countdown_nid is not None:

@@ -123,3 +123,22 @@ def test_digest_changes_with_content(repo_root: Path) -> None:
     a = parse_config(example(repo_root))
     b = parse_config(_mutate(example(repo_root), "consent.countdown_seconds", 7))
     assert a.digest() != b.digest()
+
+
+@pytest.mark.req("R-16")
+def test_unlimited_study_mode_needs_the_reminder(repo_root: Path) -> None:
+    """ADR-021: auto_disarm null is allowed only together with a reminder interval."""
+    raw = example(repo_root)
+    assert raw["consent"]["auto_disarm_after_minutes"] is None  # the default since ADR-021
+    assert raw["consent"]["armed_reminder_minutes"] == 240
+    assert schema_errors(raw, "config.schema.json") == []
+    parse_config(raw)
+    bad = copy.deepcopy(raw)
+    bad["consent"]["armed_reminder_minutes"] = None
+    assert schema_errors(bad, "config.schema.json")
+    with pytest.raises(ConfigError):
+        parse_config(bad)
+    limited = copy.deepcopy(bad)
+    limited["consent"]["auto_disarm_after_minutes"] = 240  # a time limit needs no reminder
+    assert schema_errors(limited, "config.schema.json") == []
+    parse_config(limited)

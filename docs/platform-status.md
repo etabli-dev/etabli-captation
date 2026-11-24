@@ -35,7 +35,7 @@ facts are verified; Linux is released independently.
 Proprietary licence · recordings only on encrypted storage (`block`) · OBS start-up egress
 accepted · Windows fully supported in v1 · video = meeting window · Linux OBS = Flatpak ·
 **v0.1.0 = Linux after the real-call checklist**, macOS/Windows as v0.2.0 · no preconfigured
-hook · tray loss mid-call: continue with a warning · auto-disarm 240 min · macOS target 26.
+hook · tray loss mid-call: continue with a warning · auto-disarm 240 min · macOS target 26 (macOS: superseded by ADR-021: no time limit with a 4-hour reminder, macOS 27 reference, macOS first).
 
 ADR-017: the repository is public (source available, no licence granted); `DISCLAIMER.md` must be
 accepted with a checkbox before the first use on every machine and for every user

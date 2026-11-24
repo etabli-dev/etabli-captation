@@ -8,7 +8,8 @@ language: de
 
 consent:
   require_armed: true             # cannot be disabled
-  auto_disarm_after_minutes: 240
+  auto_disarm_after_minutes: null   # null = until ended (ADR-021); or 5–720 minutes
+  armed_reminder_minutes: 240       # reminder while study mode is on (required with null)
   countdown_seconds: 5
   ask_consent_ref_on_arm: true
   consent_ref_pattern: '^[A-Z0-9-]{3,32}$'

@@ -85,8 +85,9 @@ class SessionParams:
     start_debounce_s: float
     stop_debounce_s: float
     countdown_seconds: int
-    auto_disarm_after_minutes: int
+    auto_disarm_after_minutes: int | None  # None: until ended (ADR-021)
     segments_on_mode_change: bool
+    armed_reminder_minutes: int | None = None
 
     @classmethod
     def from_config(cls, cfg: Config) -> SessionParams:
@@ -96,6 +97,7 @@ class SessionParams:
             countdown_seconds=cfg.consent.countdown_seconds,
             auto_disarm_after_minutes=cfg.consent.auto_disarm_after_minutes,
             segments_on_mode_change=cfg.recording.segments_on_mode_change,
+            armed_reminder_minutes=cfg.consent.armed_reminder_minutes,
         )
 
 
@@ -233,7 +235,7 @@ class Armed:
     """Arming accepted. ``expires_at`` is on the ``Clock.now()`` (monotonic) scale."""
 
     consent_ref: str | None
-    expires_at: float
+    expires_at: float | None  # None: no time limit (ADR-021)
 
 
 @dataclass(frozen=True)
@@ -312,8 +314,8 @@ class ShowReminder:
 
 @dataclass(frozen=True)
 class Notify:
-    """One-off notification. Kinds: auto_disarmed, low_disk, obs_lost, recording_stopped,
-    start_cancelled, start_failed, countdown_failed."""
+    """One-off notification. Kinds: auto_disarmed, still_armed, low_disk, obs_lost,
+    recording_stopped, start_cancelled, start_failed, countdown_failed."""
 
     kind: str
 
@@ -368,6 +370,7 @@ class SessionMachine:
         self._armed = False
         self._consent_ref: str | None = None
         self._expires_at: float | None = None
+        self._reminder_at: float | None = None
         self._ctx: CallContext | None = None
         self._pending_app: str | None = None
         self._pending_since = 0.0
@@ -407,8 +410,21 @@ class SessionMachine:
             self._disarm("auto", out)
         self._dispatch(event, now, out)
         self._advance(now, out)
+        self._remind_armed(now, out)
         self._sync_tray(out)
         return out
+
+    def _remind_armed(self, now: float, out: list[Command]) -> None:
+        """ADR-021: while study mode is on, remind the user every ``armed_reminder_minutes``.
+        Only between calls (never during a countdown or a recording); a due reminder waits."""
+        due = self._reminder_at
+        if not self._armed or due is None or now < due:
+            return
+        if self._state is not State.ARMED_IDLE:
+            return
+        out.append(Notify("still_armed"))
+        interval = self._p.armed_reminder_minutes
+        self._reminder_at = None if interval is None else now + interval * 60.0
 
     def status(self) -> dict[str, object]:
         """Snapshot for ``captation status`` (no personal data)."""
@@ -492,7 +508,10 @@ class SessionMachine:
         was_armed = self._armed
         self._armed = True
         self._consent_ref = event.consent_ref
-        self._expires_at = now + self._p.auto_disarm_after_minutes * 60.0
+        minutes = self._p.auto_disarm_after_minutes
+        self._expires_at = None if minutes is None else now + minutes * 60.0
+        remind = self._p.armed_reminder_minutes
+        self._reminder_at = None if remind is None else now + remind * 60.0
         self._suppressed = None
         out.append(Armed(event.consent_ref, self._expires_at))
         if self._state is State.DISARMED:
@@ -505,6 +524,7 @@ class SessionMachine:
         self._armed = False
         self._consent_ref = None
         self._expires_at = None
+        self._reminder_at = None
         st = self._state
         if st in (State.ARMED_IDLE, State.PENDING_START):
             self._state = State.DISARMED

@@ -45,7 +45,7 @@ Sitzungen nach N Tagen gelöscht (protokolliert; laufende Aufnahmen nie).
 
 | Maßnahme | Umsetzung |
 |---|---|
-| Einwilligungsschutz | Aufnahme nur im Studienmodus; Start immer deaktiviert; Studienmodus endet automatisch (`auto_disarm_after_minutes`) und wird nie gespeichert |
+| Einwilligungsschutz | Aufnahme nur im Studienmodus; Start immer deaktiviert; Studienmodus endet automatisch (`auto_disarm_after_minutes`) oder – ohne Zeitlimit (ADR-021) – beim Beenden, Abmelden oder Neustart, mit Erinnerung alle 4 h; er wird nie gespeichert |
 | Transparenz | Countdown mit „Abbrechen“ vor jeder Aufnahme; während der Aufnahme sichtbares rotes Tray-Symbol; Erinnerung, die Einwilligung mündlich zu bestätigen. Diese Anzeigen lassen sich nicht abschalten; ohne Tray-Symbol wird der Studienmodus verweigert |
 | Kein Vorlauf | Keine Pre-Roll-/Replay-Puffer: nichts vor dem Countdown wird aufgezeichnet |
 | Lokale Speicherung | siehe Abschnitt 3 |

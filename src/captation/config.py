@@ -41,11 +41,22 @@ class _Strict(BaseModel):
 
 class ConsentConfig(_Strict):
     require_armed: Literal[True]
-    auto_disarm_after_minutes: int
+    # None: study mode stays on until it is ended (ADR-021); then the reminder is mandatory.
     countdown_seconds: int
+    auto_disarm_after_minutes: int | None = None
+    armed_reminder_minutes: int | None = 240
     ask_consent_ref_on_arm: bool = True
     consent_ref_pattern: str | None = None
     start_reminder_text: str | None = None
+
+    @model_validator(mode="after")
+    def _never_unnoticed(self) -> ConsentConfig:
+        # Study mode without a time limit must keep reminding the user (ADR-021, §2.3).
+        if self.auto_disarm_after_minutes is None and self.armed_reminder_minutes is None:
+            raise ValueError(
+                "consent.armed_reminder_minutes is required when auto_disarm_after_minutes is null"
+            )
+        return self
 
 
 class DetectionConfig(_Strict):

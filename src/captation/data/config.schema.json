@@ -43,9 +43,22 @@
     "consent": {
       "type": "object",
       "additionalProperties": false,
+      "if": {
+        "properties": {
+          "auto_disarm_after_minutes": {
+            "type": "null"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "armed_reminder_minutes": {
+            "type": "integer"
+          }
+        }
+      },
       "required": [
         "require_armed",
-        "auto_disarm_after_minutes",
         "countdown_seconds"
       ],
       "properties": {
@@ -54,9 +67,24 @@
           "description": "Recording only while armed. Cannot be disabled (docs/principles.md §2)."
         },
         "auto_disarm_after_minutes": {
-          "type": "integer",
+          "type": [
+            "integer",
+            "null"
+          ],
           "minimum": 5,
-          "maximum": 720
+          "maximum": 720,
+          "default": null,
+          "description": "Study mode ends after this many minutes; null = it stays on until it is ended, the agent stops, or the user logs out (ADR-021), with armed_reminder_minutes"
+        },
+        "armed_reminder_minutes": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 15,
+          "maximum": 720,
+          "default": 240,
+          "description": "While study mode is on, a notification with 'end study mode' every this many minutes (between calls). Required when auto_disarm_after_minutes is null (ADR-021)"
         },
         "countdown_seconds": {
           "type": "integer",

@@ -9,8 +9,9 @@
    Zweck, Aufnahmeart Ton/Bild, Speicherung, Rücktrittsrecht). Die Erklärung erhält eine
    Referenz, z. B. `P-017`. Captation speichert nur diese Referenz, nie das Dokument.
 2. **Studienmodus aktivieren:** Tray-Menü „Studienmodus aktivieren…“ oder
-   `captation arm --ref P-017`. Das Symbol wird gelb. Der Studienmodus endet automatisch nach der
-   eingestellten Zeit.
+   `captation arm --ref P-017`. Das Symbol wird gelb. Ohne Zeitlimit (Standard, ADR-021) bleibt er
+   an, bis Sie ihn beenden, sich abmelden oder neu starten; alle 4 Stunden erinnert eine
+   Mitteilung daran. Mit `consent.auto_disarm_after_minutes` endet er nach der eingestellten Zeit.
 3. **Gespräch beginnen.** Captation erkennt die Anruf-App und zeigt einen **Countdown** mit
    „Abbrechen“. Wer nicht aufgenommen werden soll, bricht hier ab: dann entsteht keine Aufnahme.
 4. **Rotes Symbol abwarten.** Erst wenn das Symbol rot ist, läuft die Aufnahme.

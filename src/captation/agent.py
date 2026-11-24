@@ -433,7 +433,13 @@ class Agent:
             log.warning("arming refused: %s", ", ".join(cmd.reasons))
         elif isinstance(cmd, Armed):
             minutes = self.cfg.consent.auto_disarm_after_minutes
-            ui.notice("armed.title", "armed.body", minutes=minutes, ref=cmd.consent_ref or "–")
+            if minutes is None:  # ADR-021: until ended, with a reminder
+                hours = (self.cfg.consent.armed_reminder_minutes or 0) / 60
+                ui.notice(
+                    "armed.title", "armed.body_open", hours=f"{hours:g}", ref=cmd.consent_ref or "–"
+                )
+            else:
+                ui.notice("armed.title", "armed.body", minutes=minutes, ref=cmd.consent_ref or "–")
             status = self.d.encryption()
             verdict = storage.encryption_verdict(status, self.cfg.storage.require_disk_encryption)
             self._encryption_warning = (
@@ -487,6 +493,8 @@ class Agent:
             self._write_session(cmd)
         elif isinstance(cmd, ShowReminder):
             ui.recording_started()
+        elif isinstance(cmd, Notify) and cmd.kind == "still_armed":
+            ui.still_armed()  # ADR-021: with a button that ends study mode
         elif isinstance(cmd, Notify):
             title, body = NOTICE_KINDS.get(cmd.kind, ("app.title", "app.title"))
             ui.notice(title, body)

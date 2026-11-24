@@ -11,6 +11,7 @@ STRINGS: dict[str, dict[str, str]] = {
         "app.title": "Établi Captation",
         "tray.disarmed": "Captation – nicht aktiv",
         "tray.armed": "Captation – Studienmodus aktiv (noch {minutes} min)",
+        "tray.armed_open": "Captation – Studienmodus aktiv (bis Sie ihn beenden)",
         "tray.countdown": "Captation – Aufnahme startet in {seconds} s ({app})",
         "tray.recording": "Captation – AUFNAHME {glyph} {app} – {elapsed}",
         "menu.arm": "Studienmodus aktivieren…",
@@ -35,6 +36,12 @@ STRINGS: dict[str, dict[str, str]] = {
         "Beginn mündlich bestätigen lassen.",
         "armed.title": "Studienmodus aktiv",
         "armed.body": "Aufnahmen sind für {minutes} min möglich (Einwilligung: {ref}).",
+        "armed.body_open": "Aufnahmen sind möglich, bis Sie den Studienmodus beenden; "
+        "Erinnerung alle {hours} h (Einwilligung: {ref}).",
+        "still_armed.title": "Studienmodus ist noch aktiv",
+        "still_armed.body": "Anrufe werden nach dem Countdown aufgenommen. Beenden über "
+        "„Studienmodus beenden“ oder das Symbol in der Menüleiste.",
+        "still_armed.end": "Studienmodus beenden",
         "disarmed.title": "Studienmodus beendet",
         "auto_disarmed.body": "Die Zeit ist abgelaufen; der Studienmodus wurde beendet.",
         "refused.title": "Studienmodus nicht aktiviert",
@@ -101,6 +108,7 @@ STRINGS: dict[str, dict[str, str]] = {
         "app.title": "Établi Captation",
         "tray.disarmed": "Captation – not active",
         "tray.armed": "Captation – study mode on ({minutes} min left)",
+        "tray.armed_open": "Captation – study mode on (until you end it)",
         "tray.countdown": "Captation – recording starts in {seconds} s ({app})",
         "tray.recording": "Captation – RECORDING {glyph} {app} – {elapsed}",
         "menu.arm": "Start study mode…",
@@ -125,6 +133,12 @@ STRINGS: dict[str, dict[str, str]] = {
         "verbally at the start.",
         "armed.title": "Study mode on",
         "armed.body": "Recordings are possible for {minutes} min (consent: {ref}).",
+        "armed.body_open": "Recordings are possible until you end study mode; reminder every "
+        "{hours} h (consent: {ref}).",
+        "still_armed.title": "Study mode is still on",
+        "still_armed.body": "Calls are recorded after the countdown. End it with “End study "
+        "mode” or the menu-bar icon.",
+        "still_armed.end": "End study mode",
         "disarmed.title": "Study mode ended",
         "auto_disarmed.body": "Time is up; study mode has ended.",
         "refused.title": "Study mode not started",

@@ -142,8 +142,10 @@ uv run python tools/check_facts.py && uv run python tools/licence_gate.py
    **rot** – die Aufnahme läuft. Jetzt die Einwilligung mündlich bestätigen lassen.
 4. Kamera an während eines Tonanrufs → Captation wechselt automatisch auf Video.
 5. Nach dem Auflegen endet die Aufnahme nach wenigen Sekunden; die Dateien werden geprüft.
-6. **„Studienmodus beenden“** (oder `captation disarm`). Der Studienmodus endet auch
-   automatisch nach der eingestellten Zeit.
+6. **„Studienmodus beenden“** (oder `captation disarm`). Ohne Zeitlimit (Standard, ADR-021)
+   bleibt der Studienmodus an, bis Sie ihn beenden, sich abmelden oder neu starten; alle 4 Stunden
+   erinnert eine Mitteilung daran (mit „Studienmodus beenden“). Mit
+   `consent.auto_disarm_after_minutes` (5–720) endet er stattdessen nach der eingestellten Zeit.
 
 Weitere Befehle: `captation status`, `captation stop` (Aufnahme beenden, bereit bleiben),
 `captation cancel` (Countdown abbrechen).

@@ -829,7 +829,9 @@ def test_params_from_config() -> None:
         countdown_seconds=cfg.consent.countdown_seconds,
         auto_disarm_after_minutes=cfg.consent.auto_disarm_after_minutes,
         segments_on_mode_change=cfg.recording.segments_on_mode_change,
+        armed_reminder_minutes=cfg.consent.armed_reminder_minutes,
     )
+    assert params.auto_disarm_after_minutes is None and params.armed_reminder_minutes == 240
 
 
 def test_zero_start_debounce_reaches_countdown_in_one_tick() -> None:
@@ -883,3 +885,51 @@ def test_ended_session_never_resumes_after_rearm() -> None:
     cmds = d.send(ObsBack(), 0.5)
     assert not any(isinstance(c, StartSegment) for c in cmds)
     assert d.state is State.POSTPROCESSING
+
+
+# ---- ADR-021: study mode without a time limit, with a reminder ------------------------------
+
+
+@pytest.mark.req("R-16")
+def test_without_a_time_limit_study_mode_stays_on_and_reminds() -> None:
+    params = replace(PARAMS, auto_disarm_after_minutes=None, armed_reminder_minutes=240)
+    d = Driver(params=params)
+    d.send(Arm("CR-001"))
+    assert d.m.status()["auto_disarm_in_s"] is None
+    assert d.send_s(Tick(None), 239 * 60) == []
+    assert d.send_s(Tick(None), 60) == ["Notify(still_armed)"]  # after 4 h
+    assert d.send_s(Tick(None), 60) == []  # once per interval
+    assert d.send_s(Tick(None), 240 * 60) == ["Notify(still_armed)"]
+    for _ in range(3):  # days later: still on, never disarmed by time
+        d.send(Tick(None), 24 * 3600)
+    assert d.m.armed and d.state is State.ARMED_IDLE
+    d.send(Disarm())
+    assert d.send_s(Tick(None), 240 * 60) == []  # no reminder once ended
+
+
+@pytest.mark.req("R-16")
+def test_reminder_never_interrupts_a_call() -> None:
+    params = replace(PARAMS, auto_disarm_after_minutes=None, armed_reminder_minutes=240)
+    d = Driver(params=params)
+    d.send(Arm("CR-001"))
+    d.send(Tick(ctx()), 239 * 60)
+    d.send(Tick(ctx()), PARAMS.start_debounce_s)
+    d.send(Tick(ctx()), PARAMS.countdown_seconds + 1)
+    assert d.state is State.RECORDING
+    for _ in range(5):  # the reminder falls due during the call
+        assert "Notify(still_armed)" not in d.send_s(Tick(ctx()), 60)
+    d.send(Tick(None), 1)
+    d.send(Tick(None), PARAMS.stop_debounce_s + 1)
+    assert d.state is State.STOPPING
+    assert "Notify(still_armed)" not in d.send_s(SegmentStopped(ok=True))
+    after = d.send_s(PostprocessDone(ok=True))
+    assert d.state is State.ARMED_IDLE
+    assert "Notify(still_armed)" in after  # as soon as the call is finalised
+    assert "Notify(still_armed)" not in d.send_s(Tick(None), 1)  # and only once
+
+
+def test_time_limit_still_works_without_a_reminder() -> None:
+    d = Driver(params=replace(PARAMS, auto_disarm_after_minutes=5, armed_reminder_minutes=None))
+    d.send(Arm("CR-001"))
+    d.send(Tick(None), 5 * 60)
+    assert not d.m.armed
