@@ -156,3 +156,34 @@ def test_reopen_event_opens_the_menu() -> None:
 def test_open_menu_without_a_running_menu_bar_item() -> None:
     ui = MacUi()
     assert ui.open_menu() is False  # no icon yet: the agent then shows a notice instead
+
+
+class FakeCoreGraphics:
+    """Plain functions like ctypes' (ctypes sets ``restype`` on them)."""
+
+    def __init__(self, preflight: bool, request: bool) -> None:
+        self.requests = 0
+
+        def preflight_fn() -> bool:
+            return preflight
+
+        def request_fn() -> bool:
+            self.requests += 1
+            return request
+
+        self.CGPreflightScreenCaptureAccess = preflight_fn
+        self.CGRequestScreenCaptureAccess = request_fn
+
+
+def test_screen_capture_access_is_requested_only_when_missing() -> None:
+    granted = FakeCoreGraphics(preflight=True, request=False)
+    assert mac_ui.request_screen_capture_access(lambda path: granted) is True
+    assert granted.requests == 0  # already granted: no prompt
+    missing = FakeCoreGraphics(preflight=False, request=False)
+    assert mac_ui.request_screen_capture_access(lambda path: missing) is False
+    assert missing.requests == 1
+
+    def no_framework(path: str) -> object:
+        raise OSError("not on macOS")
+
+    assert mac_ui.request_screen_capture_access(no_framework) is None

@@ -159,6 +159,12 @@ def run(cfg: Config, config_path: str | None = None) -> None:
         signal.signal(signal.SIGHUP, on_signal)
     agent.start()
     server.start()
+    if sys.platform == "darwin":
+        # Window titles identify browser calls (ADR-021): ask once, from this process, so the
+        # app itself appears in System Settings (the helper inherits the permission).
+        from captation.ui.macos import request_screen_capture_access
+
+        threading.Thread(target=request_screen_capture_access, daemon=True).start()
     guard = watchdog.start(config_path)  # stops a recording if this process dies
     cleaned = threading.Lock()
 

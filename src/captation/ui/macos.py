@@ -206,6 +206,33 @@ class MacUi(PystrayUi):
 
 
 VISIBILITY_TIMEOUT_S = 2.0
+COREGRAPHICS = "/System/Library/Frameworks/CoreGraphics.framework/CoreGraphics"  # PF-134
+
+
+def request_screen_capture_access(
+    load: Callable[[str], Any] | None = None,
+) -> bool | None:
+    """Ask once for *Screen & System Audio Recording* so the probe can read window titles
+    (browser meetings, ADR-021). Called in the agent's own process, so macOS lists the app in
+    System Settings (switched off) and shows its prompt; later calls do not prompt again.
+    True if already granted; None if CoreGraphics cannot be loaded (PF-134)."""
+    import ctypes
+
+    try:
+        cg = (load or ctypes.cdll.LoadLibrary)(COREGRAPHICS)
+        cg.CGPreflightScreenCaptureAccess.restype = ctypes.c_bool
+        cg.CGRequestScreenCaptureAccess.restype = ctypes.c_bool
+        if cg.CGPreflightScreenCaptureAccess():
+            return True
+        granted = bool(cg.CGRequestScreenCaptureAccess())
+    except (OSError, AttributeError):
+        log.warning("ui: screen-recording permission cannot be requested")
+        return None
+    if not granted:
+        log.info("ui: screen recording not granted: browser calls stay 'browser' (no titles)")
+    return granted
+
+
 # Opening an app that already runs (Finder, Spotlight, Launchpad, `open -a`) sends it the
 # "reopen" Apple Event instead of starting a second process (PF-133).
 AE_CORE_EVENT_CLASS = 0x61657674  # PF-133: 'aevt' (kCoreEventClass)
