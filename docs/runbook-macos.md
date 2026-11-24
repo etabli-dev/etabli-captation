@@ -386,3 +386,16 @@ checklist in the release notes; commit the verified facts together with any code
    prepared under ADR-015 and the packaging under ADR-005; record the outcome as a new ADR.)
 7. Any fact refuted on the Mac that changes a decision (e.g. ScreenCaptureKit audio of browser
    helpers not captured by bundle ID → desktop fallback for browser meetings)?
+
+### Countdown validation after ADR-024
+
+- A virtualenv without usable notifications cannot confirm a countdown; it refuses recording.
+  Exercise live countdowns in the signed application bundle.
+- Verify the coloured status dot is actually visible, including with menu-bar managers. A tray
+  API reporting availability does not establish that another utility has not hidden the icon.
+- During the countdown, cancel and verify `session.json` is the only remaining session file.
+  A deletion failure must warn and retry without reporting a successful cancellation.
+- Kill an isolated test agent during its countdown; restart only against synthetic data and
+  confirm recovery stops OBS before discarding the provisional session.
+- A disconnected OBS server must never be treated as confirmation that recording stopped.
+  Recovery, disarm and low-disk paths must retain the indicator until confirmation.

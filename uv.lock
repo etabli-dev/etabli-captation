@@ -1,5 +1,5 @@
 version = 1
-revision = 3
+revision = 5
 requires-python = "==3.12.*"
 
 [[package]]
@@ -203,10 +203,11 @@ wheels = [
 [[package]]
 name = "desktop-notifier"
 version = "6.2.0"
-source = { registry = "https://pypi.org/simple" }
+source = { git = "https://github.com/samschott/desktop-notifier.git?rev=5d8d8fe53158bf382542b497c03af87d379d2a19#5d8d8fe53158bf382542b497c03af87d379d2a19" }
 dependencies = [
     { name = "bidict" },
     { name = "dbus-fast", marker = "python_version < '0'" },
+    { name = "immutabledict" },
     { name = "packaging" },
     { name = "rubicon-objc", marker = "sys_platform == 'darwin'" },
     { name = "typing-extensions" },
@@ -216,10 +217,6 @@ dependencies = [
     { name = "winrt-windows-foundation", marker = "sys_platform == 'win32'" },
     { name = "winrt-windows-foundation-collections", marker = "sys_platform == 'win32'" },
     { name = "winrt-windows-ui-notifications", marker = "sys_platform == 'win32'" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/41/df/67c6ff92d870881b5a6e073773a209eeb2e263a15cd112ddddff5c14abe8/desktop_notifier-6.2.0.tar.gz", hash = "sha256:528167b691ce40031fa92f67c9f452b7be29846613e19d11ec0c49cb5242d338", size = 34487, upload-time = "2025-08-08T18:14:50.801Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/91/36/b32a806dbb7bce308fecc977220c03ca7990831491bebc582b02619ff980/desktop_notifier-6.2.0-py3-none-any.whl", hash = "sha256:193b0885e694a99ae22f72234c91afbac633074295b44183bf9716dd4077b8f3", size = 34406, upload-time = "2025-08-08T18:14:49.497Z" },
 ]
 
 [[package]]
@@ -262,7 +259,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "dbus-fast", marker = "sys_platform == 'linux'", specifier = ">=5.2" },
-    { name = "desktop-notifier", marker = "sys_platform != 'linux'", specifier = ">=6.2" },
+    { name = "desktop-notifier", marker = "sys_platform != 'linux'", git = "https://github.com/samschott/desktop-notifier.git?rev=5d8d8fe53158bf382542b497c03af87d379d2a19" },
     { name = "jsonschema", specifier = ">=4.26" },
     { name = "keyring", specifier = ">=25.7" },
     { name = "pillow", marker = "sys_platform != 'linux'", specifier = ">=11.0" },
@@ -348,6 +345,15 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/7e/00/6737e05ce7b0b86a504c58752619662f917d08110c0d669efc8e1b2cc63f/hypothesis-6.170.17-pp312-pypy312_pp80-manylinux2014_aarch64.manylinux_2_17_aarch64.whl", hash = "sha256:6343b870471d9760ad3d6266694c503c710bbf8a75b70b8862a65638eaef53be", size = 1126114, upload-time = "2026-11-20T07:45:56.294Z" },
     { url = "https://files.pythonhosted.org/packages/9b/fa/4ce227f998e1f314d2ca0ebb24232f7bbe80a31fc0496f6f4fa2cfbd059f/hypothesis-6.170.17-pp312-pypy312_pp80-manylinux2014_x86_64.manylinux_2_17_x86_64.whl", hash = "sha256:671251a5f3ae59f574e47232f9dd52010e7e103acdbb3971fc6cdfb38f1425fe", size = 1169860, upload-time = "2026-11-20T07:46:09.358Z" },
     { url = "https://files.pythonhosted.org/packages/cb/0b/3ddd2251710dbd375a3d97b07dc1582f27992aa39d644b79d2ff9596b19b/hypothesis-6.170.17-pp312-pypy312_pp80-win_amd64.whl", hash = "sha256:afdc8b033a03dd86051aed0fab8870736ced8761c02db324317376024c272d18", size = 694205, upload-time = "2026-11-20T07:46:20.426Z" },
+]
+
+[[package]]
+name = "immutabledict"
+version = "4.3.1"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/1d/e6/718471048fea0366c3e3d1df3acfd914ca66d571cdffcf6d37bbcd725708/immutabledict-4.3.1.tar.gz", hash = "sha256:f844a669106cfdc73f47b1a9da003782fb17dc955a54c80972e0d93d1c63c514", size = 7806, upload-time = "2026-02-15T10:32:34.668Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/a3/ce/f9018bf69ae91b273b6391a095e7c93fa5e1617f25b6ba81ad4b20c9df10/immutabledict-4.3.1-py3-none-any.whl", hash = "sha256:c9facdc0ff30fdb8e35bd16532026cac472a549e182c94fa201b51b25e4bf7bf", size = 5000, upload-time = "2026-02-15T10:32:33.672Z" },
 ]
 
 [[package]]

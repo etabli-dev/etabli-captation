@@ -97,7 +97,15 @@ def test_video_segment_captures_the_app_not_the_display(tmp_path: Path) -> None:
     assert prep.capture == "window" and prep.warnings == ()
     screen = fake.inputs[SCREEN]
     assert screen["kind"] == "screen_capture"
-    assert screen["settings"] == {"type": 2, "application": "us.zoom.xos", "show_cursor": True}
+    assert screen["settings"] == {
+        "type": 2,
+        "application": "us.zoom.xos",
+        "show_cursor": True,
+        "display_uuid": "MAIN-DISPLAY-UUID",
+    }
+    assert screen["transform"]["boundsType"] == "OBS_BOUNDS_SCALE_INNER"
+    assert screen["transform"]["boundsWidth"] == fake.video[fake.current_profile]["baseWidth"]
+    assert screen["transform"]["boundsHeight"] == fake.video[fake.current_profile]["baseHeight"]
 
 
 @pytest.mark.req("R-28")
@@ -113,7 +121,7 @@ def test_video_without_bundle_falls_back_to_display_with_warning(tmp_path: Path)
     }
     ctl.teardown_segment()
     ctl.prepare_segment("video", ZOOM)
-    assert "display_uuid" not in fake.inputs[SCREEN]["settings"]  # app capture needs no display
+    assert fake.inputs[SCREEN]["settings"]["display_uuid"] == "MAIN-DISPLAY-UUID"
     ctl.teardown_segment()
 
 
@@ -315,3 +323,22 @@ def test_facetime_and_phone_calls_use_desktop_audio() -> None:
     for bundle in ("com.apple.avconferenced", "com.apple.FaceTime"):
         settings = cap.window_settings("avconferenced", bundle, None)
         assert settings is not None and "com.apple.FaceTime" in settings.values()
+
+
+def test_video_without_source_dimensions_is_rejected(tmp_path: Path, monkeypatch) -> None:
+    from captation.obs import controller
+    from captation.obs.client import ObsError
+
+    ctl, fake = mac_controller(tmp_path)
+    ctl.prepare_segment("video", ZOOM)
+    monkeypatch.setattr(
+        fake,
+        "_r_GetSceneItemTransform",
+        lambda d: {"sceneItemTransform": {"sourceWidth": 0, "sourceHeight": 0}},
+    )
+    ticks = iter((0.0, 6.0))
+    # Only the bounded source-readiness wait consumes this clock.
+    monkeypatch.setattr(ctl, "_ensure_idle", lambda: None)
+    monkeypatch.setattr(controller.time, "monotonic", lambda: next(ticks))
+    with pytest.raises(ObsError, match="no frames"):
+        ctl._fit_video("Video")

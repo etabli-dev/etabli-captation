@@ -443,6 +443,8 @@ class ObsController:
         capture: CaptureKind = "none"
         if mode == "video":
             capture = self._prepare_video(scene, warnings, target)
+            if capture != "none":
+                self._fit_video(scene)
         return PreparedSegment(mode=mode, capture=capture, warnings=tuple(warnings))
 
     def _prepare_video(self, scene: str, warnings: list[str], target: AppRef | None) -> CaptureKind:
@@ -455,6 +457,8 @@ class ObsController:
             window_kind = self._first_kind(cap.window_kinds)
             settings = cap.window_settings(target.process_name, target.bundle_id, target.exe_path)
             if window_kind is not None and settings is not None:
+                if cap.main_display is not None:
+                    settings = self._with_main_display(settings, *cap.main_display)  # PF-130
                 self._req(
                     "CreateInput",
                     {
@@ -485,6 +489,42 @@ class ObsController:
         if self.cfg.recording.video.capture == "window_preferred":
             warnings.append("capture:display_fallback")
         return "display"
+
+    def _fit_video(self, scene: str) -> None:
+        """Fit the complete capture into the canvas; never silently crop a Retina display."""
+        item = self._req("GetSceneItemId", {"sceneName": scene, "sourceName": SCREEN})[
+            "sceneItemId"
+        ]  # PF-138
+        video = self._req("GetVideoSettings")  # PF-138
+        self._req(
+            "SetSceneItemTransform",  # PF-138
+            {
+                "sceneName": scene,
+                "sceneItemId": item,
+                "sceneItemTransform": {  # PF-138
+                    "boundsType": "OBS_BOUNDS_SCALE_INNER",
+                    "boundsWidth": video["baseWidth"],  # PF-138
+                    "boundsHeight": video["baseHeight"],
+                    "boundsAlignment": 0,  # PF-138
+                    "alignment": 5,
+                    "positionX": 0,
+                    "positionY": 0,  # PF-138
+                },
+            },
+        )
+        deadline = time.monotonic() + 5.0
+        while True:
+            transform = self._req(
+                "GetSceneItemTransform",
+                {"sceneName": scene, "sceneItemId": item},  # PF-138
+            )["sceneItemTransform"]  # PF-138
+            if (
+                transform.get("sourceWidth", 0) > 0 and transform.get("sourceHeight", 0) > 0
+            ):  # PF-138
+                return
+            if time.monotonic() >= deadline:
+                raise ObsError("video capture has no frames: check capture target and permission")
+            time.sleep(0.1)
 
     def _with_main_display(self, settings: dict[str, Any], kind: str, key: str) -> dict[str, Any]:
         """Name the main display explicitly: an empty display records black frames (macOS)."""

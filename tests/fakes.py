@@ -221,6 +221,24 @@ class FakeObs:
         }
         return {"inputUuid": "x"}
 
+    def _r_GetSceneItemId(self, d: dict[str, Any]) -> dict[str, Any]:
+        return {"sceneItemId": list(self.inputs).index(d["sourceName"])}
+
+    def _r_SetSceneItemTransform(self, d: dict[str, Any]) -> dict[str, Any]:
+        name = list(self.inputs)[d["sceneItemId"]]
+        self.inputs[name]["transform"] = dict(d["sceneItemTransform"])
+        return {}
+
+    def _r_GetSceneItemTransform(self, d: dict[str, Any]) -> dict[str, Any]:
+        name = list(self.inputs)[d["sceneItemId"]]
+        return {
+            "sceneItemTransform": {
+                "sourceWidth": 2880,
+                "sourceHeight": 1800,
+                **self.inputs[name].get("transform", {}),
+            }
+        }
+
     def _r_RemoveInput(self, d: dict[str, Any]) -> dict[str, Any]:
         name = d["inputName"]
         self.inputs.pop(name, None)

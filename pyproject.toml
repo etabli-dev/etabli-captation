@@ -28,7 +28,8 @@ dependencies = [
     # macOS / Windows tray and notifications (ADR-003, verified in stages 06/07)
     "pystray>=0.19.5; sys_platform != 'linux'",
     "pillow>=11.0; sys_platform != 'linux'",
-    "desktop-notifier>=6.2; sys_platform != 'linux'",
+    # Upstream macOS permission callback fix; replace with a release once available.
+    "desktop-notifier @ git+https://github.com/samschott/desktop-notifier.git@5d8d8fe53158bf382542b497c03af87d379d2a19 ; sys_platform != 'linux'",
     # Windows: map ConsentStore exe paths to PIDs (stage 07)
     "psutil>=7.2; sys_platform == 'win32'",
 ]
@@ -98,3 +99,6 @@ markers = [
 [tool.coverage.run]
 source = ["captation"]
 branch = true
+
+[tool.hatch.metadata]
+allow-direct-references = true

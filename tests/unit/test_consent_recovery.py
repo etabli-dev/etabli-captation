@@ -148,3 +148,30 @@ def test_late_prewarm_cannot_confirm_a_stop() -> None:
     commands = d.send(ObsBack(stop_confirmed=False))
     assert d.state is State.STOPPING
     assert not any(isinstance(c, DiscardSession) for c in commands)
+
+
+def test_startup_recovery_never_touches_media_without_stop_confirmation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from types import SimpleNamespace
+
+    from captation import service
+
+    def unavailable() -> None:
+        raise OSError("synthetic disconnected OBS")
+
+    def forbidden(*args: object) -> None:
+        pytest.fail("recovery touched media before confirming stop")
+
+    monkeypatch.setattr(service.manage, "obs_running", lambda cfg: True)
+    monkeypatch.setattr(service.storage, "recover_stale_sessions", forbidden)
+    fake = SimpleNamespace(
+        d=SimpleNamespace(
+            obs=SimpleNamespace(
+                ensure_running=lambda **kwargs: None,
+                reset=unavailable,
+            )
+        )
+    )
+    with pytest.raises(RuntimeError, match="stop confirmation"):
+        service.recover_after_crash(cfg_with(tmp_path), fake)
