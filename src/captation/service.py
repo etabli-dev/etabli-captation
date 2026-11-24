@@ -159,9 +159,10 @@ def run(cfg: Config, config_path: str | None = None) -> None:
         signal.signal(signal.SIGHUP, on_signal)
     agent.start()
     server.start()
-    if sys.platform == "darwin":
+    if sys.platform == "darwin" and getattr(sys, "frozen", False):
         # Window titles identify browser calls (ADR-021): ask once, from this process, so the
-        # app itself appears in System Settings (the helper inherits the permission).
+        # app itself appears in System Settings (the helper inherits the permission). Only from
+        # the app bundle: from a terminal macOS would ask on behalf of the terminal (review).
         from captation.ui.macos import request_screen_capture_access
 
         threading.Thread(target=request_screen_capture_access, daemon=True).start()

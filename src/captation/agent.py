@@ -243,12 +243,12 @@ class Agent:
         also when a headset connects or disconnects during the call (PF-132)."""
         if ctx is None or self.machine.state not in (State.RECORDING, State.PENDING_STOP):
             return
-        if ctx.app_id != self.machine.current_app_id:
+        if not self.machine.is_current_call(ctx):
             return
         try:
             with self._obs_lock:
                 changed = self.d.obs.follow_local_device(ctx.capture_target.input_device)
-        except (ObsError, OSError) as exc:
+        except Exception as exc:  # never let it skip the tray refresh of this poll
             log.warning("local track: input switch failed: %s", type(exc).__name__)
             return
         if changed:

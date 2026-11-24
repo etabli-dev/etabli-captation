@@ -418,3 +418,20 @@ def test_start_now_kickstarts_only_a_loaded_launch_agent(tmp_path: Path) -> None
     auto.install()
     assert auto.start_now() is True
     assert launchd.calls[-1] == ["/bin/launchctl", "kickstart", "gui/501/de.etabli.captation"]
+
+
+def test_start_now_only_for_this_build(tmp_path: Path) -> None:
+    launchd = FakeLaunchd()
+    auto = make_autostart(tmp_path, launchd)
+    auto.install()
+    other = MacAutostart(
+        home=tmp_path,
+        runner=launchd,
+        uid=501,
+        log_dir=lambda: tmp_path,
+        command=lambda: "/Applications/Older.app/Contents/MacOS/captation",
+        environ_path="/usr/bin",
+        sleep=lambda s: None,
+    )
+    assert other.start_now() is False  # the LaunchAgent points to another build
+    assert not any(c[1] == "kickstart" for c in launchd.calls)

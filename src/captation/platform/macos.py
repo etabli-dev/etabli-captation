@@ -947,6 +947,15 @@ class MacAutostart:
         crash. False if the LaunchAgent is not loaded."""
         if not self.loaded():
             return False
+        try:
+            with self.plist_path.open("rb") as fh:
+                program = plistlib.load(fh).get(LD_PROGRAM_ARGUMENTS) or []
+        except (OSError, ValueError):
+            return False
+        if not program or program[0] != self._command():
+            # It points to another build (an old app or a venv): not that one (review).
+            log.warning("autostart points to another build: run `captation install-autostart`")
+            return False
         return self._runner([LAUNCHCTL, "kickstart", self.service], 30).returncode == 0  # PF-122
 
     def install(self, *, systemd: bool = False) -> list[Path]:

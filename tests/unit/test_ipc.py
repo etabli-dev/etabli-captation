@@ -218,3 +218,27 @@ def test_opening_the_app_hands_the_start_to_launchd(monkeypatch: pytest.MonkeyPa
     monkeypatch.setattr(plat, "get_platform", lambda: Platform())
     cli.open_app()
     assert kicked == [True] and started == []
+
+
+def test_opening_the_app_exits_cleanly_when_run_exits(monkeypatch: pytest.MonkeyPatch) -> None:
+    import typer
+
+    from captation import cli
+    from captation import platform as plat
+
+    def request(msg: dict[str, object], timeout_s: float = 5) -> dict[str, object]:
+        raise cli.ipc.AgentNotRunning("no agent")
+
+    def run(config: object = None) -> None:
+        raise typer.Exit(0)  # e.g. another agent took the lock first
+
+    class NoAutostart:
+        def autostart(self) -> object:
+            return object()
+
+    monkeypatch.setattr(cli.ipc, "request", request)
+    monkeypatch.setattr(cli, "run", run)
+    monkeypatch.setattr(plat, "get_platform", lambda: NoAutostart())
+    with pytest.raises(SystemExit) as exc:
+        cli.open_app()
+    assert exc.value.code == 0

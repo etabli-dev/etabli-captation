@@ -101,7 +101,10 @@ def open_app() -> None:
             return  # launchd starts the agent (and restarts it after a crash)
     except Exception:  # no autostart on this platform, or launchctl failed: start here
         pass
-    run(None)
+    try:
+        run(None)
+    except typer.Exit as exc:  # called outside Typer's runner: exit with its code, no traceback
+        raise SystemExit(exc.exit_code) from None
 
 
 models_app = typer.Typer(help="Local models for transcripts and summaries.", no_args_is_help=True)

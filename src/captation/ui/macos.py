@@ -113,8 +113,9 @@ class MacUi(PystrayUi):
         """The user opened the app (Finder, Spotlight, Launchpad): open the menu-bar menu, as a
         click on the item would. Runs on the main thread."""
         item = getattr(self._icon, "_status_item", None)  # not-a-fact: pystray darwin internals
-        if item is None or not self._loop_running.is_set():
-            return False
+        if item is None or not self._loop_running.is_set() or not self._icon_visible():
+            return False  # the agent shows a notice instead
+        from PyObjCTools import AppHelper
 
         def click() -> None:
             button = item.button()
@@ -123,7 +124,18 @@ class MacUi(PystrayUi):
                 return
             button.performClick_(None)
 
-        self._ui(click)
+        def close() -> None:
+            menu = item.menu()
+            if menu is not None:
+                menu.cancelTracking()
+
+        # Queued, so the Apple Event handler returns at once. An open menu holds the signal
+        # handlers (default run-loop mode only), so it closes itself after a while; queued
+        # calls run in all modes (review 2026-11-24).
+        AppHelper.callAfter(click)
+        timer = threading.Timer(MENU_AUTO_CLOSE_S, AppHelper.callAfter, args=(close,))
+        timer.daemon = True
+        timer.start()
         return True
 
     def _icon_visible(self) -> bool:
@@ -206,6 +218,7 @@ class MacUi(PystrayUi):
 
 
 VISIBILITY_TIMEOUT_S = 2.0
+MENU_AUTO_CLOSE_S = 30.0  # below launchd's ExitTimeOut (60 s), so a stop is never held longer
 COREGRAPHICS = "/System/Library/Frameworks/CoreGraphics.framework/CoreGraphics"  # PF-134
 
 

@@ -414,6 +414,12 @@ class SessionMachine:
         """App of the open session (countdown to post-processing): ``classify``'s tie-break (a)."""
         return self._session.app_id if self._session is not None else None
 
+    def is_current_call(self, ctx: CallContext) -> bool:
+        """``ctx`` belongs to the open session (same app, or the same process under another
+        app ID, e.g. a browser title change)."""
+        s = self._session
+        return s is not None and self._same_call(s, ctx)
+
     def handle(self, event: Event) -> list[Command]:
         """Process one event and return the commands to execute, in order."""
         out: list[Command] = []

@@ -77,6 +77,8 @@ FACT_VALUE_PROPERTIES = frozenset({SCK_AUDIO_TYPE, SCREEN_TYPE})
 
 # Bundles whose call audio per-app capture misses (PF-135): FaceTime, the Phone app and the
 # FaceTime/Continuity call service.
+# The call service has no windows: a FaceTime or iPhone video call is shown by FaceTime.
+CALL_WINDOW_APP = {"com.apple.avconferenced": "com.apple.FaceTime"}  # PF-135
 SYSTEM_CALL_AUDIO = frozenset(
     {
         "com.apple.avconferenced",  # PF-135
@@ -123,11 +125,15 @@ class MacCaptureProfile(CaptureProfile):
     def window_settings(
         self, process_name: str, bundle_id: str | None, exe_path: str | None
     ) -> dict[str, object] | None:
-        if not self.can_target_app(bundle_id):
+        # Video and audio differ (review 2026-11-24): the FaceTime/iPhone call service plays
+        # its audio where per-app capture cannot reach it (PF-135), but its picture is the
+        # FaceTime window, which application capture does reach.
+        target = CALL_WINDOW_APP.get(bundle_id or "", bundle_id)
+        if not target:
             return None  # controller falls back to display capture with a warning
         return {
             SCREEN_TYPE: SCREEN_APPLICATION,
-            SCREEN_APPLICATION_KEY: bundle_id,
+            SCREEN_APPLICATION_KEY: target,
             SCREEN_SHOW_CURSOR: True,
         }
 

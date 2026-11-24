@@ -311,3 +311,7 @@ def test_facetime_and_phone_calls_use_desktop_audio() -> None:
     for bundle in ("com.apple.avconferenced", "com.apple.FaceTime", "com.apple.mobilephone"):
         assert bundle in SYSTEM_CALL_AUDIO and not cap.can_target_app(bundle)
     assert cap.can_target_app("net.whatsapp.WhatsApp")  # captured per app (verified live)
+    # the picture of a FaceTime/iPhone video call is the FaceTime window, not the screen
+    for bundle in ("com.apple.avconferenced", "com.apple.FaceTime"):
+        settings = cap.window_settings("avconferenced", bundle, None)
+        assert settings is not None and "com.apple.FaceTime" in settings.values()

@@ -449,3 +449,14 @@ def test_follow_default_ignores_the_call_device(tmp_path: Path) -> None:
     ctl.start_segment(tmp_path / "rec", "seg01_container")
     assert fake.inputs["Captation Local"]["settings"]["device_id"] == "default"
     assert ctl.follow_local_device("alsa_input.headset") is False
+
+
+@pytest.mark.req("R-13")
+def test_an_unknown_call_device_is_not_asked_for_every_poll(tmp_path: Path) -> None:
+    ctl, fake = make(tmp_path)
+    ctl.prepare_segment("audio", AppRef(pid=0, process_name="signal", input_device="default"))
+    ctl.start_segment(tmp_path / "rec", "seg01_container")
+    before = len(fake.names())
+    for _ in range(10):
+        assert ctl.follow_local_device("private-aggregate") is False
+    assert len(fake.names()) - before <= 2  # looked up once, then remembered
