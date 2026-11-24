@@ -125,7 +125,8 @@ def recover_after_crash(cfg: Config, agent: Agent) -> None:
             agent.d.obs.ensure_running(timeout_s=10)
             agent.d.obs.reset()
         except Exception:
-            log.warning("startup: could not check OBS for a leftover recording")
+            log.warning("startup: could not confirm the stop of a leftover recording")
+            raise RuntimeError("OBS stop confirmation required before crash recovery") from None
     now = datetime.now().astimezone()
     recovered = storage.recover_stale_sessions(cfg, now)
     if recovered:

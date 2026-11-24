@@ -130,7 +130,14 @@ class ConsentUi:
 
     # ---- countdown ------------------------------------------------------------------------
 
-    def countdown(self, app_id: str, seconds: int, *, live: bool = False) -> int:
+    def countdown(
+        self,
+        app_id: str,
+        seconds: int,
+        *,
+        live: bool = False,
+        on_cancel: Callable[[], None] | None = None,
+    ) -> int:
         """Show the countdown; returns the fallback level that was used (1–3). ``live``
         (ADR-022): the recording already runs, *Cancel* deletes it."""
         self.close_countdown()
@@ -144,7 +151,9 @@ class ConsentUi:
                 title,
                 body,
                 actions=[(CANCEL_ACTION, self.t("countdown.cancel"))],
-                on_action=self._on_action,
+                on_action=lambda key: (
+                    (on_cancel or self.handlers.cancel)() if key == CANCEL_ACTION else None
+                ),
                 critical=True,
             )
             level = 1 if nid is not None else 3

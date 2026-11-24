@@ -211,7 +211,10 @@ def needs_processing(session_dir: Path) -> bool:
         doc = load_session(session_dir)
     except (OSError, ValueError, TranscriptionError):
         return False
-    if doc.get("status") not in ("complete", "interrupted"):
+    if (session_dir / ".countdown-pending").exists() or doc.get("status") not in (
+        "complete",
+        "interrupted",
+    ):
         return False
     return any(
         f.get("role") in SPEAKERS and (session_dir / str(f.get("path"))).is_file()
@@ -939,7 +942,10 @@ def _process(
         doc = load_session(session_dir)
     except (OSError, ValueError, TranscriptionError):
         return ProcessResult(sid, "skipped", "no readable session.json")
-    if doc.get("status") not in ("complete", "interrupted"):
+    if (session_dir / ".countdown-pending").exists() or doc.get("status") not in (
+        "complete",
+        "interrupted",
+    ):
         return ProcessResult(sid, "skipped", f"status {doc.get('status')}")
     missing = missing_tools(tc)
     if missing:

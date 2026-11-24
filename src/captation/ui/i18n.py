@@ -84,6 +84,8 @@ STRINGS: dict[str, dict[str, str]] = {
         "eine Bestätigung ohne Ankreuzen ist nicht möglich.",
         "ask_ref.title": "Studienmodus aktivieren",
         "ask_ref.prompt": "Einwilligungs-Referenz (z. B. P-017):",
+        "notify.discard_failed": "Abbruch: Mediendaten konnten noch nicht gelöscht werden. "
+        "Der Vorgang wird wiederholt.",
         "notify.start_cancelled": "Der Start der Aufnahme wurde abgebrochen.",
         "notify.low_disk": "Zu wenig freier Speicher – keine Aufnahme.",
         "notify.obs_lost": "OBS ist abgestürzt oder wurde beendet. Falls OBS nach dem "
@@ -182,6 +184,8 @@ STRINGS: dict[str, dict[str, str]] = {
         "given without ticking the box.",
         "ask_ref.title": "Start study mode",
         "ask_ref.prompt": "Consent reference (e.g. P-017):",
+        "notify.discard_failed": "Cancellation: media could not be deleted yet. "
+        "Cleanup will be retried.",
         "notify.start_cancelled": "The recording start was cancelled.",
         "notify.low_disk": "Not enough free disk space – nothing is recorded.",
         "notify.obs_lost": "OBS crashed or was closed. If OBS asks about Safe Mode after the "

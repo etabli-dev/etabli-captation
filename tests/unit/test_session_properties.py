@@ -42,6 +42,7 @@ from captation.session import (
     SegmentStopped,
     SessionMachine,
     SessionParams,
+    StartFailed,
     StartSegment,
     State,
     StopSegment,
@@ -89,6 +90,8 @@ others = st.sampled_from(
         Cancel(),
         ManualStop(),
         ObsLost(),
+        ObsLost(reason="stopped"),
+        StartFailed(),
         ObsBack(),
         LowDisk(),
         CountdownElapsed(),
@@ -400,3 +403,43 @@ def test_classify_is_deterministic(
         assert first.capture_target in mic
         assert first.pid not in exclude and first.pid not in IGNORED_PIDS
         assert (first.window_title is None) or store_titles
+
+
+@pytest.mark.req("R-17", "R-53")
+@settings(max_examples=500, deadline=None)
+@given(params, steps, st.floats(min_value=0, max_value=10, allow_nan=False))
+def test_discard_requires_confirmation_with_delayed_countdown(
+    p: SessionParams, seq: list[Step], delay: float
+) -> None:
+    from captation.session import CountdownShown
+
+    d = Driver(params=p, ack_countdown=False)
+    pending: tuple[float, str] | None = None
+    stopped = True
+
+    def check(event: Event, dt: float = 0) -> None:
+        nonlocal stopped, pending
+        before = d.state
+        commands = d.send(event, dt)
+        if isinstance(event, SegmentStopped) and event.ok and before is State.STOPPING:
+            stopped = True
+        if isinstance(event, ObsBack) and before in (State.ERROR, State.STOPPING):
+            stopped = True
+        if isinstance(event, ObsLost) and event.reason == "stopped":
+            stopped = True
+        for command in commands:
+            if isinstance(command, NotifyCountdown):
+                pending = (d.clock.now() + delay, command.session_id)
+            elif isinstance(command, StartSegment):
+                stopped = False
+            elif isinstance(command, DiscardSession):
+                assert stopped, "discard before stop confirmation"
+
+    for dt, event in seq:
+        if pending is not None and pending[0] <= d.clock.now() + dt:
+            due, sid = pending
+            pending = None
+            advance = max(0, due - d.clock.now())
+            check(CountdownShown(sid), advance)
+            dt -= advance
+        check(event, dt)

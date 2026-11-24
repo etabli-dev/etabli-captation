@@ -438,3 +438,24 @@ Decided by the owner after the macOS audit, for daily use on the build Mac.
   deadlines, urgency, parts, retention, worker pause/stop); a synthetic two-voice call
   (macOS `say`) with known agreements and to-dos; the owner's four test calls.
 
+
+## ADR-024 — Durable countdown cancellation and confirmed-stop recovery (2026-11-24)
+
+- **Context:** review found that a crash during the live countdown could preserve provisional
+  media, queued cancellation could arrive after the deadline, and recovery could delete or
+  finalise media without a confirmed stop.
+- **Decision:** create a durable `.countdown-pending` marker before media can start and remove
+  it only after the countdown is accepted or cancelled cleanup is committed. Recovery discards
+  marked sessions after confirming OBS stopped; marked sessions are excluded from transcription.
+  Cancellation carries its request time and session ID. Notification actions are bound to the
+  session that displayed them. Stop uncertainty keeps the recording indicator active and blocks
+  finalisation. A connection becoming ready is not stop confirmation. Failed deletion stays
+  pending, warns, and retries; no successful cancellation notice is shown before cleanup.
+- **Consequences:** supersedes ADR-013's unconditional finalisation after the recovery timeout.
+  Unreachable OBS does not prove a stop. Notifications unavailable at countdown time refuse a
+  start: tray blink and sound alone cannot confirm the visible countdown. A transient detection
+  gap at its deadline uses stop debounce. Camera state at countdown completion determines the
+  initial kept recording mode, including when later mode switches are disabled.
+- **Verification:** regression tests in `test_consent_recovery.py` and `test_agent.py`, generated
+  sequences including delayed countdown acknowledgement, failed starts and unsolicited OBS
+  stops. Installed-app and real-call acceptance remain separate release checks.

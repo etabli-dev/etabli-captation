@@ -82,9 +82,11 @@ def test_deterministic_start_failure_finalises_once_as_failed() -> None:
     assert out[:4] == [
         "MarkSegmentInterrupted(1)",
         "Notify(start_failed)",
+        "StopSegment(1)",
         "Teardown",
-        "RunPostprocess",
     ]
+    assert d.state is State.STOPPING
+    assert "RunPostprocess" in d.send_s(SegmentStopped(), 1)
     assert d.send_s(PostprocessDone(), 1) == ["WriteSessionJson(failed)"]
     for _ in range(5):  # no retry storm for the same call
         assert d.send_s(Tick(SIGNAL), 1) == []

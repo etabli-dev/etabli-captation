@@ -37,6 +37,7 @@ log = logging.getLogger(__name__)
 
 SESSION_SCHEMA = "session.schema.json"
 SESSION_FILE = "session.json"
+PROVISIONAL_FILE = ".countdown-pending"
 UNASSIGNED = "unassigned"
 SCHEMA_VERSION = 1
 GIB = 1024**3
@@ -575,6 +576,31 @@ def apply_retention(cfg: Config, now: datetime) -> list[str]:
     return deleted
 
 
+def mark_provisional(directory: Path) -> None:
+    """Persist cancellation intent before media starts or a delayed cancellation stops it."""
+    fd = os.open(directory / PROVISIONAL_FILE, os.O_WRONLY | os.O_CREAT, 0o600)
+    with os.fdopen(fd, "w") as fh:
+        fh.write("pending\n")
+        fh.flush()
+        os.fsync(fh.fileno())
+
+
+def discard_session_media(directory: Path) -> bool:
+    """Delete only within the session, preserving the crash-recovery marker until committed."""
+    ok = True
+    for path in directory.iterdir():
+        if path.name in (SESSION_FILE, PROVISIONAL_FILE):
+            continue
+        try:
+            if path.is_dir() and not path.is_symlink():
+                shutil.rmtree(path)
+            else:
+                path.unlink()
+        except OSError:
+            ok = False
+    return ok
+
+
 def recover_stale_sessions(cfg: Config, now: datetime) -> list[str]:
     """Finalise sessions left in ``status: recording`` by a crashed agent (review finding 3).
 
@@ -589,10 +615,18 @@ def recover_stale_sessions(cfg: Config, now: datetime) -> list[str]:
             doc = json.loads(path.read_text(encoding="utf-8"))
         except (OSError, ValueError):
             continue
-        if not isinstance(doc, dict) or doc.get("status") != "recording":
+        if not isinstance(doc, dict):
+            continue
+        provisional = (session_dir / PROVISIONAL_FILE).exists()
+        if doc.get("status") != "recording" and not provisional:
+            continue
+        if provisional and not discard_session_media(session_dir):
+            log.warning("cancelled session cleanup pending")
             continue
         stamp = iso_timestamp(now)
-        doc["status"] = "interrupted"
+        doc["status"] = "cancelled" if provisional else "interrupted"
+        if provisional:
+            doc["segments"] = []
         doc["ended_at"] = doc.get("ended_at") or stamp
         for seg in doc.get("segments", []):
             if not seg.get("ended_at"):
@@ -618,6 +652,8 @@ def recover_stale_sessions(cfg: Config, now: datetime) -> list[str]:
             if cfg.postprocess.make_read_only:
                 for name in names:
                     make_read_only(session_dir / name)
+        if provisional:
+            (session_dir / PROVISIONAL_FILE).unlink()
         recovered.append(session_dir.name)
         log.warning("session %s recovered after an agent crash (interrupted)", session_dir.name)
     return recovered

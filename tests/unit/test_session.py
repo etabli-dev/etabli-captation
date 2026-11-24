@@ -345,8 +345,8 @@ TABLE: dict[str, tuple[tuple[str, ...], Row]] = {
         (
             State.ERROR,
             [(1, ManualStop())],
-            ["RunPostprocess", "SetTrayState(armed)"],
-            State.POSTPROCESSING,
+            STOP,
+            State.STOPPING,
         ),
     ),
     "error--low-disk": (
@@ -354,8 +354,8 @@ TABLE: dict[str, tuple[tuple[str, ...], Row]] = {
         (
             State.ERROR,
             [(1, LowDisk())],
-            ["RunPostprocess", "Notify(low_disk)", "SetTrayState(armed)"],
-            State.POSTPROCESSING,
+            [*STOP, "Notify(low_disk)"],
+            State.STOPPING,
         ),
     ),
     # STOPPING
@@ -474,7 +474,7 @@ DISARM_FROM: dict[State, list[str]] = {
     State.PENDING_STOP: [*STOP, "Disarmed(user)"],
     State.STOPPING: ["Disarmed(user)"],
     State.POSTPROCESSING: ["Disarmed(user)", "SetTrayState(disarmed)"],
-    State.ERROR: ["RunPostprocess", "Disarmed(user)", "SetTrayState(disarmed)"],
+    State.ERROR: [*STOP, "Disarmed(user)"],
 }
 
 
@@ -803,6 +803,7 @@ def test_status_reports_the_running_session() -> None:
         "consent_ref": "CR-001",
         "auto_disarm_in_s": AUTO_DISARM - d.clock.t,
         "media_active": True,
+        "discard_pending": False,
         "session_id": st["session_id"],
         "app_id": "signal",
         "mode": "audio",
@@ -1031,7 +1032,10 @@ def test_live_countdown_start_failure_ends_once_without_media() -> None:
     d = Driver(params=LIVE)
     _live_countdown(d)
     out = d.send_s(StartFailed(), 0.5)
-    assert "Notify(start_failed)" in out and any(c.startswith("DiscardSession") for c in out)
+    assert "Notify(start_failed)" in out and "StopSegment(1)" in out
+    assert "DiscardSession" not in out
+    out = d.send_s(SegmentStopped(ok=True))
+    assert "DiscardSession" in out
     out = d.send_s(PostprocessDone(ok=True), 1.0)
     assert "WriteSessionJson(failed)" in out
     check_invariants(log_steps(d))

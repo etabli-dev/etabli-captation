@@ -489,6 +489,7 @@ def test_unconfirmed_stop_keeps_the_indicator_until_obs_is_reset(
         raise ObsError("StopRecord timed out")
 
     monkeypatch.setattr(rig.obs, "stop_segment", failing_stop)
+    monkeypatch.setattr(rig.obs, "reset", failing_stop)
     monkeypatch.setattr(rig.agent, "_recover_obs", lambda *a: None)  # recovery tested elsewhere
     rig.probe.mic = ()
     rig.tick(n=12)
@@ -643,3 +644,58 @@ def test_a_countdown_that_cannot_be_shown_records_nothing_even_live(
     rig.tick(n=10)
     assert "StartRecord" not in rig.fake_obs.names()  # recording waits for a shown countdown
     assert all(s["status"] == "cancelled" for s in rig.sessions())
+
+
+@pytest.mark.req("R-17", "R-18")
+def test_indicator_and_provisional_record_exist_before_obs_start(live_rig: Rig) -> None:
+    from captation import storage
+
+    rig = live_rig
+    original = rig.obs.start_segment
+
+    def checked(directory: Path, basename: str) -> None:
+        assert rig.backend.states[-1][0] == "recording"
+        assert (directory / storage.PROVISIONAL_FILE).exists()
+        document = json.loads((directory / storage.SESSION_FILE).read_text())
+        assert len(document["segments"]) == 1
+        original(directory, basename)
+
+    rig.obs.start_segment = checked  # type: ignore[method-assign]
+    arm(rig)
+    _start_call(rig)
+    assert rig.fake_obs.recording
+
+
+@pytest.mark.req("R-17", "R-19")
+def test_failed_discard_retries_and_keeps_crash_marker(
+    live_rig: Rig, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from captation import storage
+    from captation.session import Cancel
+
+    rig = live_rig
+    arm(rig)
+    _start_call(rig)
+    discard = storage.discard_session_media
+    monkeypatch.setattr(storage, "discard_session_media", lambda directory: False)
+    rig.agent.submit(Cancel())
+    rig.flush()
+    assert rig.state is State.POSTPROCESSING
+    folder = next((rig.cfg.data_root_path / "unassigned").glob("S-*"))
+    assert (folder / storage.PROVISIONAL_FILE).exists()
+    assert rig.sessions()[0]["status"] == "recording"
+    monkeypatch.setattr(storage, "discard_session_media", discard)
+    rig.tick(seconds=6)
+    assert rig.sessions()[0]["status"] == "cancelled"
+    assert {p.name for p in folder.iterdir()} == {storage.SESSION_FILE}
+
+
+@pytest.mark.req("R-17")
+def test_unavailable_notification_never_confirms_countdown(live_rig: Rig) -> None:
+    rig = live_rig
+    rig.ui.countdown = lambda *args, **kwargs: 3  # type: ignore[method-assign]
+    arm(rig)
+    _start_call(rig)
+    rig.flush()
+    assert "StartRecord" not in rig.fake_obs.names()
+    assert rig.state is State.DISARMED

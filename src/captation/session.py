@@ -133,7 +133,10 @@ class AutoDisarmDue:
 
 @dataclass(frozen=True)
 class Cancel:
-    """The user cancelled the countdown (notification action or tray menu)."""
+    """Cancellation time and session are captured before entering the event queue."""
+
+    requested_at: float | None = None
+    session_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -150,7 +153,7 @@ class ObsLost:
 
 @dataclass(frozen=True)
 class ObsBack:
-    pass
+    stop_confirmed: bool = True
 
 
 @dataclass(frozen=True)
@@ -319,6 +322,11 @@ class WriteSessionJson:
 
 
 @dataclass(frozen=True)
+class ConfirmSession:
+    session_id: str
+
+
+@dataclass(frozen=True)
 class ShowReminder:
     session_id: str
 
@@ -348,6 +356,7 @@ Command = (
     | DiscardSession
     | WriteSessionJson
     | ShowReminder
+    | ConfirmSession
     | Notify
 )
 
@@ -367,6 +376,8 @@ class _Session:
     recording_since: float | None = None
     ending: bool = False  # a stop was requested: the session ends, it never resumes
     provisional: bool = False  # ADR-022: recording during the countdown, not yet confirmed
+    stopped: bool = True
+    discard_retry_at: float | None = None
     discard: bool = False  # ADR-022: cancelled during the countdown: media is deleted
 
 
@@ -441,7 +452,7 @@ class SessionMachine:
         due = self._reminder_at
         if not self._armed or due is None or now < due:
             return
-        if self._state is not State.ARMED_IDLE:
+        if self._state is not State.ARMED_IDLE or self._ctx is not None:
             return
         out.append(Notify("still_armed"))
         interval = self._p.armed_reminder_minutes
@@ -466,6 +477,7 @@ class SessionMachine:
             "consent_ref": self._consent_ref,
             "auto_disarm_in_s": auto_disarm_in,
             "media_active": self._media_active(),
+            "discard_pending": s.discard if s is not None else False,
             "session_id": s.session_id if s is not None else None,
             "app_id": app_id,
             "mode": s.segment_mode if s is not None else None,
@@ -486,14 +498,30 @@ class SessionMachine:
                 if self._armed:
                     self._disarm("auto", out)
             case Cancel():
-                if self._state is State.COUNTDOWN:
+                s = self._session
+                same = s is not None and (
+                    event.session_id is None or event.session_id == s.session_id
+                )
+                timely = (
+                    event.requested_at is not None
+                    and event.requested_at <= self._countdown_deadline
+                )
+                if same and self._state is State.COUNTDOWN:
+                    self._cancel_countdown_by_user(out)
+                elif (
+                    same
+                    and timely
+                    and s is not None
+                    and self._state in (State.RECORDING, State.PENDING_STOP)
+                ):
+                    s.provisional = True
                     self._cancel_countdown_by_user(out)
             case ManualStop():
                 self._on_manual_stop(out)
             case ObsLost():
                 self._on_obs_lost(event.reason, out)
             case ObsBack():
-                self._on_obs_back(out)
+                self._on_obs_back(event.stop_confirmed, out)
             case LowDisk():
                 self._on_low_disk(event.quiet, out)
             case CountdownElapsed():
@@ -554,10 +582,8 @@ class SessionMachine:
             self._state = State.DISARMED
         elif st is State.COUNTDOWN:
             self._abort_countdown(out, State.DISARMED)
-        elif st in (State.RECORDING, State.PENDING_STOP):
+        elif st in (State.RECORDING, State.PENDING_STOP) or st is State.ERROR:
             self._begin_stop(out)
-        elif st is State.ERROR:
-            self._begin_postprocess(out)
         # STOPPING / POSTPROCESSING: the running finalisation ends in DISARMED.
         out.append(Disarmed(reason))
         if reason == "auto":
@@ -567,18 +593,17 @@ class SessionMachine:
         st = self._state
         if st is State.COUNTDOWN:
             self._cancel_countdown_by_user(out)
-        elif st in (State.RECORDING, State.PENDING_STOP):
+        elif st in (State.RECORDING, State.PENDING_STOP) or st is State.ERROR:
             self._suppress(self._live().app_id)
             self._begin_stop(out)
-        elif st is State.ERROR:
-            self._suppress(self._live().app_id)
-            self._begin_postprocess(out)
 
     def _on_obs_lost(self, reason: str, out: list[Command]) -> None:
         kind = "recording_stopped" if reason == "stopped" else "obs_lost"
         if reason != "stopped":
             self._obs_up = False
         st = self._state
+        if reason == "stopped" and self._session is not None:
+            self._session.stopped = True
         if st in (State.RECORDING, State.PENDING_STOP):
             self._mark_interrupted(out)
             out.append(Notify(kind))
@@ -626,8 +651,7 @@ class SessionMachine:
             self._mark_interrupted(out)
             out.append(CloseCountdown(s0.session_id))
             out.append(Notify("start_failed"))
-            out.append(Teardown())
-            self._begin_postprocess(out)
+            self._begin_stop(out)
             return
         if self._state not in (State.RECORDING, State.PENDING_STOP, State.ERROR):
             return
@@ -636,14 +660,20 @@ class SessionMachine:
         self._suppress(s.app_id)
         self._mark_interrupted(out)
         out.append(Notify("start_failed"))
-        out.append(Teardown())
-        self._begin_postprocess(out)
+        self._begin_stop(out)
 
-    def _on_obs_back(self, out: list[Command]) -> None:
+    def _on_obs_back(self, stop_confirmed: bool, out: list[Command]) -> None:
         self._obs_up = True
+        if not stop_confirmed:
+            return
+        if self._state is State.STOPPING:
+            self._live().stopped = True
+            self._begin_postprocess(out)
+            return
         if self._state is not State.ERROR:
             return
         s = self._live()
+        s.stopped = True  # ObsBack is emitted only after the executor reset OBS.
         ctx = self._ctx
         # Only an OBS loss in the middle of a recording resumes; a session whose stop was
         # requested (disarm, hang-up, manual stop, low disk) ends here (audit 2026-11-24).
@@ -671,12 +701,9 @@ class SessionMachine:
         elif st is State.COUNTDOWN:
             self._suppress(self._live().app_id)
             self._abort_countdown(out, State.ARMED_IDLE)
-        elif st in (State.RECORDING, State.PENDING_STOP):
+        elif st in (State.RECORDING, State.PENDING_STOP) or st is State.ERROR:
             self._suppress(self._live().app_id)
             self._begin_stop(out)
-        elif st is State.ERROR:
-            self._suppress(self._live().app_id)
-            self._begin_postprocess(out)
         elif st is not State.ARMED_IDLE:
             return  # DISARMED, STOPPING, POSTPROCESSING: nothing to refuse or stop
         elif quiet:
@@ -691,11 +718,16 @@ class SessionMachine:
             self._state = State.ERROR
             self._lost_since = None
             return
+        self._live().stopped = True
         self._begin_postprocess(out)
 
     def _on_postprocess_done(self, ok: bool, out: list[Command]) -> None:
         s = self._live()
         status: SessionStatus
+        if s.discard and not ok:
+            s.discard_retry_at = self._clock.now() + 5.0
+            out.append(Notify("discard_failed"))
+            return
         if s.discard:  # ADR-022: a start cancelled during the countdown keeps no media
             status = "failed" if s.failed or not ok else "cancelled"
         elif not ok or s.failed:
@@ -720,7 +752,12 @@ class SessionMachine:
     def _step(self, now: float, out: list[Command]) -> None:
         st = self._state
         ctx = self._ctx
-        if st is State.ARMED_IDLE:
+        if st is State.POSTPROCESSING:
+            s = self._live()
+            if s.discard_retry_at is not None and now >= s.discard_retry_at:
+                s.discard_retry_at = None
+                out.append(DiscardSession(s.session_id))
+        elif st is State.ARMED_IDLE:
             if ctx is not None and ctx.app_id != self._suppressed:
                 self._state = State.PENDING_START
                 self._pending_app = ctx.app_id
@@ -769,7 +806,7 @@ class SessionMachine:
             lost_too_long = False
         elapsed = self._countdown_elapsed or now >= self._countdown_deadline
         if ctx is None:
-            if lost_too_long or elapsed:
+            if lost_too_long or (elapsed and not s.provisional):
                 self._abort_countdown(out, State.ARMED_IDLE)
         elif elapsed and not self._countdown_shown:
             # Fail closed: the user never saw a countdown with Cancel, so nothing is recorded.
@@ -856,7 +893,8 @@ class SessionMachine:
     def _cancel_countdown_by_user(self, out: list[Command]) -> None:
         self._suppress(self._live().app_id)
         self._abort_countdown(out, State.ARMED_IDLE)
-        out.append(Notify("start_cancelled"))
+        if self._session is None:
+            out.append(Notify("start_cancelled"))
 
     def _start_provisional(self, s: _Session, now: float, out: list[Command]) -> None:
         """ADR-022: the countdown with Cancel is visible: record from now on. Cancel within the
@@ -878,6 +916,11 @@ class SessionMachine:
         if s.provisional:
             # ADR-022: the countdown ended without Cancel: the running recording is kept.
             s.provisional = False
+            out.append(ConfirmSession(s.session_id))
+            if s.segment_mode == "audio" and ctx.mode == "video":
+                out.append(StopSegment(s.session_id, s.segment))
+                out.append(Teardown())
+                self._start_segment("video", ctx.capture_target, "upgrade:countdown", out)
             out.append(ShowReminder(s.session_id))
             return
         s.recording_since = now
@@ -887,6 +930,7 @@ class SessionMachine:
     def _start_segment(self, mode: Mode, target: AppRef, trigger: str, out: list[Command]) -> None:
         s = self._live()
         s.segment += 1
+        s.stopped = False
         s.segment_mode = mode
         self._sync_tray(out)  # the indicator goes up before the media starts
         out.append(StartSegment(s.session_id, s.segment, mode, target, trigger))
@@ -910,6 +954,9 @@ class SessionMachine:
 
     def _begin_postprocess(self, out: list[Command]) -> None:
         s = self._live()
+        if not s.stopped:
+            self._begin_stop(out)
+            return
         out.append(DiscardSession(s.session_id) if s.discard else RunPostprocess(s.session_id))
         self._state = State.POSTPROCESSING
 

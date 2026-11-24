@@ -564,6 +564,9 @@ class ObsController:
     def stop_segment(self, timeout_s: float = 20) -> Path:
         """Stop and confirm. An unconfirmed stop is checked and retried once; if OBS still
         records afterwards this raises, and the caller must not finalise the session."""
+        current = str(self._req("GetProfileList")["currentProfileName"])
+        if current not in (self.cfg.obs.profile_audio, self.cfg.obs.profile_video):
+            raise ObsError("refusing to stop a recording outside Captation profiles")
         self._stopping = True
         try:
             self._req("StopRecord")

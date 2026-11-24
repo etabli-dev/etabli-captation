@@ -948,7 +948,7 @@ class MacAutostart:
         if not self.loaded():
             return False
         try:
-            with self.plist_path.open("rb") as fh:
+            with self.plist_path.open("rb") as fh:  # not-a-fact: Python binary file mode
                 program = plistlib.load(fh).get(LD_PROGRAM_ARGUMENTS) or []
         except (OSError, ValueError):
             return False
