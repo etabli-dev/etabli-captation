@@ -549,6 +549,10 @@ class LinuxUi:
         self._action_handlers.pop(nid, None)
         self._closed_handlers.pop(nid, None)
 
+    def open_menu(self) -> bool:
+        """StatusNotifierItem hosts open the menu themselves; the agent shows a notice."""
+        return False
+
     def play_sound(self) -> None:
         player = shutil.which("pw-play")
         if player and os.path.exists(SOUND_FILE):

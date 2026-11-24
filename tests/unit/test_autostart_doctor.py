@@ -185,21 +185,28 @@ def test_doctor_reports_obs_crash_upload(tmp_path: Path, monkeypatch: pytest.Mon
     cfg = cfg_with(tmp_path)
     inst = obs_install(tmp_path)
     # Linux: OBS has neither an updater nor an automatic crash upload (PF-012)
+    monkeypatch.setattr(doctor, "current_os", lambda: "linux")
     checks = run_doctor(monkeypatch, cfg, inst=inst)
     assert checks["obs.updater"].level == "ok" and "crash" in checks["obs.updater"].detail
     assert "obs.crash_upload" not in checks
-    # macOS: the OBS ini files are read and whatever crash setting they hold is reported
+    # macOS (PF-106, verified): OBS 33 has no crash-upload setting, it asks after a crash
+    # (opt-in); only a completed upload leaves `last_crash_log_url` behind.
     config_dir = Path(inst.config_dir)
     config_dir.mkdir(parents=True)
     (config_dir / "user.ini").write_text("[General]\nCrashUploadEnabled=true\nOther=1\n")
     monkeypatch.setattr(doctor, "current_os", lambda: "macos")
     checks = run_doctor(monkeypatch, cfg, inst=inst)
     crash = checks["obs.crash_upload"]
-    assert crash.level == "warn" and "obs.updater" not in checks
-    assert "user.ini:[General] CrashUploadEnabled=true" in crash.detail
-    assert "Other" not in crash.detail and "crash-log upload" in crash.fix
+    assert crash.level == "ok" and "obs.updater" not in checks
+    (config_dir / "global.ini").write_text(
+        "[CrashHandler]\nlast_crash_log_url=https://obsproject.com/logs/x\n"
+    )
+    crash = run_doctor(monkeypatch, cfg, inst=inst)["obs.crash_upload"]
+    assert crash.level == "warn" and "uploaded a crash report" in crash.detail
+    assert "https://" not in crash.detail and "unticked" in crash.fix
     (config_dir / "user.ini").unlink()
-    assert "not found" in run_doctor(monkeypatch, cfg, inst=inst)["obs.crash_upload"].detail
+    (config_dir / "global.ini").unlink()
+    assert run_doctor(monkeypatch, cfg, inst=inst)["obs.crash_upload"].level == "ok"
     # Windows: no reader for the setting yet, still a warning with the fix
     monkeypatch.setattr(doctor, "current_os", lambda: "windows")
     crash = run_doctor(monkeypatch, cfg, inst=inst)["obs.crash_upload"]

@@ -118,12 +118,12 @@ def _awake_independent_clock() -> Callable[[], float]:
     later (§2.3). macOS: ``CLOCK_MONOTONIC`` (includes sleep); Linux: ``CLOCK_BOOTTIME``;
     Windows: ``time.monotonic()`` (QueryPerformanceCounter keeps counting in sleep)."""
     if sys.platform == "darwin":
-        clock_id = time.CLOCK_MONOTONIC
-    elif sys.platform.startswith("linux"):
-        clock_id = time.CLOCK_BOOTTIME
-    else:
-        return time.monotonic
-    return lambda: time.clock_gettime(clock_id)
+        mac_clock = time.CLOCK_MONOTONIC
+        return lambda: time.clock_gettime(mac_clock)
+    if sys.platform.startswith("linux"):
+        linux_clock = time.CLOCK_BOOTTIME
+        return lambda: time.clock_gettime(linux_clock)
+    return time.monotonic
 
 
 class RealClock:

@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import logging
 import subprocess
+import sys
 import threading
 from collections.abc import Callable
 from typing import Any
@@ -177,7 +178,10 @@ class MacUi(PystrayUi):
                 log.info("signal %d: stopping", signum)
                 stop.set()
 
-            for signum in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP):
+            signums = [signal.SIGTERM, signal.SIGINT]
+            if sys.platform != "win32":  # not-a-fact: lets mypy check this macOS module on Windows
+                signums.append(signal.SIGHUP)
+            for signum in signums:
                 MachSignals.signal(signum, on_signal)
 
             def will_terminate(note: Any) -> None:
