@@ -76,7 +76,7 @@ class Utterance:
 class TrackResult:
     segment: int
     speaker: Speaker
-    status: Literal["ok", "silent", "missing", "failed"]
+    status: Literal["ok", "partial", "silent", "missing", "failed"]
     language: str | None = None
     utterances: list[Utterance] = field(default_factory=list)
 
@@ -227,21 +227,18 @@ def _silent(file_doc: dict[str, Any]) -> bool:
 
 
 def _whisper_argv(
-    tc: TranscriptionConfig, audio: Path, out_base: Path, language: str | None = None
+    tc: TranscriptionConfig, inputs: list[Path], language: str | None = None
 ) -> list[str]:
-    argv = [
-        tc.whisper_bin,
-        "-m",
-        str(whisper_model(tc)),
-        "-f",
-        str(audio),
+    """One run for several inputs (one model load); each writes ``<input>.json`` (PF-136)."""
+    argv = [tc.whisper_bin, "-m", str(whisper_model(tc))]
+    for audio in inputs:
+        argv += ["-f", str(audio)]
+    argv += [
         "-l",
         language or tc.language,
         "-t",
         str(tc.threads),
         "-oj",  # PF-136
-        "-of",
-        str(out_base),
         "-np",
         "-sns",
     ]
@@ -274,6 +271,78 @@ def _parse_whisper(
     return TrackResult(segment, speaker, "ok", str(language) if language else None, utterances)
 
 
+FFMPEG = "ffmpeg"  # as in post-processing: resolved on PATH
+# Each track holds one speaker; pauses while the other side talks split it into turns (PF-136:
+# Whisper's own VAD merges turns and interpolates their times).
+SILENCE_NOISE_DB = (-45, -35)  # the second try for tracks with a noise floor
+SILENCE_MIN_S = 0.8
+REGION_PAD_S = 0.25
+MIN_REGION_S = 0.3
+WHISPER_BATCH = 150  # input files per whisper-cli run (one model load)
+_SILENCE_RE = re.compile(r"silence_(start|end): (-?[0-9.]+)")
+_DURATION_RE = re.compile(r"Duration: (\d+):(\d{2}):(\d{2}(?:\.\d+)?)")
+MIN_CHUNK_BYTES = 44 + int(16000 * 2 * MIN_REGION_S)  # 16 kHz mono s16 WAV of MIN_REGION_S
+
+
+def speech_regions(
+    audio: Path, duration_s: float | None, runner: Runner, timeout: float
+) -> list[tuple[float, float]] | None:
+    """Speech sections of a one-speaker track (ffmpeg silencedetect); None if ffmpeg failed."""
+    end_of_track = duration_s if duration_s and duration_s > 0 else None
+    regions: list[tuple[float, float]] = []
+    for noise in SILENCE_NOISE_DB:
+        argv = [
+            FFMPEG,
+            "-hide_banner",
+            "-nostats",
+            "-i",
+            str(audio),
+            "-af",
+            f"silencedetect=noise={noise}dB:d={SILENCE_MIN_S}",
+            "-f",
+            "null",
+            "-",
+        ]
+        res = runner(argv, timeout)
+        if res.returncode != 0:
+            return None
+        found = _DURATION_RE.search(res.stderr or "")
+        if found:  # the real length beats session.json (never cut past the end, PF-136)
+            h, m, sec = found.groups()
+            end_of_track = int(h) * 3600 + int(m) * 60 + float(sec)
+        if end_of_track is None:
+            return None
+        cursor = 0.0
+        regions = []
+        silent_from: float | None = None
+        for kind, value in _SILENCE_RE.findall(res.stderr or ""):
+            t = max(0.0, float(value))
+            if kind == "start":
+                silent_from = t
+                if t - cursor > 0:
+                    regions.append((cursor, t))
+            else:
+                cursor = t
+                silent_from = None
+        if silent_from is None and end_of_track - cursor > 0:
+            regions.append((cursor, end_of_track))
+        padded = [
+            (max(0.0, a - REGION_PAD_S), min(end_of_track, b + REGION_PAD_S))
+            for a, b in regions
+            if b - a >= MIN_REGION_S
+        ]
+        merged: list[tuple[float, float]] = []
+        for a, b in padded:
+            if merged and a <= merged[-1][1]:
+                merged[-1] = (merged[-1][0], max(merged[-1][1], b))
+            else:
+                merged.append((a, b))
+        regions = merged
+        if len(regions) >= 2:
+            break
+    return regions
+
+
 def transcribe_track(
     tc: TranscriptionConfig,
     audio: Path,
@@ -283,23 +352,66 @@ def transcribe_track(
     workdir: Path,
     runner: Runner = _default_runner,
     language: str | None = None,
+    duration_s: float | None = None,
 ) -> TrackResult:
-    out_base = workdir / f"seg{segment:02d}_{speaker}"
-    res = runner(_whisper_argv(tc, audio, out_base, language), tc.timeout_s)
-    out = out_base.with_suffix(".json")
-    if res.returncode != 0 or not out.is_file():
+    """Transcribe one track turn by turn: every speech section is its own Whisper input, so
+    each utterance keeps its real start time (one whisper-cli run per batch of sections)."""
+    regions = speech_regions(audio, duration_s, runner, tc.timeout_s)
+    if regions is None:
+        log.warning("transcript: speech detection failed for segment %d (%s)", segment, speaker)
+        return TrackResult(segment, speaker, "failed")
+    if not regions:
+        return TrackResult(segment, speaker, "ok", language)
+    chunk_dir = workdir / f"seg{segment:02d}_{speaker}"
+    chunk_dir.mkdir(mode=0o700, exist_ok=True)
+    chunks_: list[tuple[Path, float]] = []
+    for n, (a, b) in enumerate(regions, 1):
+        chunk = chunk_dir / f"c{n:05d}.wav"
+        cut = [FFMPEG, "-v", "error", "-y", "-ss", f"{a:.3f}", "-to", f"{b:.3f}", "-i", str(audio),
+               "-ac", "1", "-ar", "16000", str(chunk)]  # fmt: skip
+        if runner(cut, tc.timeout_s).returncode != 0:
+            log.warning("transcript: could not cut segment %d (%s)", segment, speaker)
+            return TrackResult(segment, speaker, "failed")
+        # whisper-cli crashes on an empty input (exit 11, PF-136): too short sections are skipped
+        if chunk.is_file() and chunk.stat().st_size >= MIN_CHUNK_BYTES:
+            chunks_.append((chunk, a))
+    result = TrackResult(segment, speaker, "ok")
+    languages: list[str] = []
+    lost = 0
+
+    def run_batch(batch: list[tuple[Path, float]]) -> bool:
+        res = runner(_whisper_argv(tc, [c for c, _ in batch], language), tc.timeout_s)
+        if res.returncode != 0:
+            return False
+        for chunk, region_start in batch:
+            out = chunk.with_name(chunk.name + ".json")
+            try:
+                doc = json.loads(out.read_text(encoding="utf-8", errors="replace"))
+            except (OSError, ValueError):
+                return False
+            part = _parse_whisper(doc, segment, speaker, offset_s + region_start)
+            result.utterances.extend(part.utterances)
+            if part.language:
+                languages.append(part.language)
+        return True
+
+    for start in range(0, len(chunks_), WHISPER_BATCH):
+        batch = chunks_[start : start + WHISPER_BATCH]
+        before = len(result.utterances)
+        if run_batch(batch):
+            continue
+        del result.utterances[before:]
+        # One bad section must not cost the whole track: retry each on its own.
+        for item in batch:
+            if not run_batch([item]):
+                lost += 1
+    if lost:
         log.warning(
-            "transcript: whisper failed for segment %d (%s), exit %d",
-            segment,
-            speaker,
-            res.returncode,
+            "transcript: %d section(s) of segment %d (%s) not transcribed", lost, segment, speaker
         )
-        return TrackResult(segment, speaker, "failed")
-    try:
-        doc = json.loads(out.read_text(encoding="utf-8", errors="replace"))
-    except ValueError:
-        return TrackResult(segment, speaker, "failed")
-    return _parse_whisper(doc, segment, speaker, offset_s)
+        result.status = "failed" if lost == len(chunks_) else "partial"
+    result.language = language or (max(set(languages), key=languages.count) if languages else None)
+    return result
 
 
 def merge(tracks: Iterable[TrackResult]) -> list[Utterance]:
@@ -809,8 +921,17 @@ def process_session(
                     tracks.append(TrackResult(idx, speaker, "silent"))
                     continue
                 should_pause()
+                duration = f.get("duration_s")
                 track = transcribe_track(
-                    tc, path, idx, speaker, offsets.get(idx, 0.0), work, runner, language_hint
+                    tc,
+                    path,
+                    idx,
+                    speaker,
+                    offsets.get(idx, 0.0),
+                    work,
+                    runner,
+                    language_hint,
+                    float(duration) if isinstance(duration, (int, float)) else None,
                 )
                 tracks.append(track)
             if language_hint is None:
@@ -820,8 +941,8 @@ def process_session(
         utterances = merge(tracks)
         languages = [t.language for t in tracks if t.language]
         language = max(set(languages), key=languages.count) if languages else None
-        transcribed = [t for t in tracks if t.status == "ok"]
-        failed = [t for t in tracks if t.status == "failed"]
+        transcribed = [t for t in tracks if t.status in ("ok", "partial")]
+        failed = [t for t in tracks if t.status in ("failed", "partial")]
         summary: dict[str, Any] | None = None
         summary_error: str | None = None
         if tc.summary.enabled and utterances:

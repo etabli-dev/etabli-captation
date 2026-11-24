@@ -64,38 +64,81 @@ LLAMA = {
 
 
 class FakeTools:
-    """Stands in for ``whisper-cli`` (writes ``<-of>.json``) and ``llama-completion``."""
+    """Stands in for ffmpeg (silencedetect, cutting), ``whisper-cli`` (writes ``<input>.json``
+    per ``-f``) and ``llama-completion``; speech sections follow ``WHISPER``."""
 
     def __init__(
         self,
         llama: dict[str, Any] | None = None,
         *,
         whisper_fail: set[str] = frozenset(),
+        crash_on: set[int] = frozenset(),
         llama_exit: int = 0,
         language: str = "de",
     ) -> None:
         self.calls: list[list[str]] = []
         self.llama = LLAMA if llama is None else llama
         self.whisper_fail = whisper_fail
+        self.crash_on = crash_on  # utterance start times (ms) whose section crashes whisper
         self.llama_exit = llama_exit
         self.language = language
+        self.cuts: dict[str, tuple[str, float]] = {}
+
+    @staticmethod
+    def _speaker(path: str) -> str:
+        return "local" if "local" in Path(path).name else "remote"
 
     def __call__(self, argv: list[str], timeout: float) -> subprocess.CompletedProcess[str]:
         self.calls.append(argv)
+        if argv[0] == "ffmpeg" and "-af" in argv:  # silencedetect
+            utt = WHISPER[self._speaker(argv[argv.index("-i") + 1])]
+            lines = ["  Duration: 00:00:12.00, start: 0.000000, bitrate: 500 kb/s"]
+            cursor = 0
+            for a, b, _ in utt:
+                if a > cursor:
+                    lines += [f"silence_start: {cursor / 1000}", f"silence_end: {a / 1000}"]
+                cursor = b
+            lines.append(f"silence_start: {cursor / 1000}")
+            return subprocess.CompletedProcess(argv, 0, "", "\n".join(lines))
+        if argv[0] == "ffmpeg":  # cut one section
+            out = Path(argv[-1])
+            out.write_bytes(b"RIFF" + b"\0" * 20000)
+            self.cuts[str(out)] = (
+                self._speaker(argv[argv.index("-i") + 1]),
+                float(argv[argv.index("-ss") + 1]),
+            )
+            return subprocess.CompletedProcess(argv, 0, "", "")
         if argv[0].endswith("whisper-cli"):
-            audio = Path(argv[argv.index("-f") + 1])
-            speaker = "local" if "local" in audio.name else "remote"
-            if speaker in self.whisper_fail:
-                return subprocess.CompletedProcess(argv, 1, "", "boom")
-            out = Path(argv[argv.index("-of") + 1]).with_suffix(".json")
-            doc = {
-                "result": {"language": self.language},
-                "transcription": [
-                    {"offsets": {"from": a, "to": b}, "text": " " + t}
+            inputs = [argv[k + 1] for k, a in enumerate(argv) if a == "-f"]
+            for chunk in inputs:
+                speaker, start = self.cuts[chunk]
+                if speaker in self.whisper_fail:
+                    return subprocess.CompletedProcess(argv, 1, "", "boom")
+                items = [
+                    (a, b, t)
                     for a, b, t in WHISPER[speaker]
-                ],
-            }
-            out.write_text(json.dumps(doc), encoding="utf-8")
+                    if start * 1000 <= a < start * 1000 + 2000
+                ]
+                if any(a in self.crash_on for a, _, _ in items):
+                    return subprocess.CompletedProcess(argv, -11, "", "")
+            for chunk in inputs:
+                speaker, start = self.cuts[chunk]
+                items = [
+                    (a, b, t)
+                    for a, b, t in WHISPER[speaker]
+                    if start * 1000 <= a < start * 1000 + 2000
+                ]
+                doc = {
+                    "result": {"language": self.language},
+                    "transcription": [
+                        {
+                            "offsets": {"from": a - int(start * 1000), "to": b - int(start * 1000)},
+                            "text": " " + t,
+                        }
+                        for a, b, t in items
+                    ],
+                }
+                Path(chunk + ".json").write_text(json.dumps(doc), encoding="utf-8")
             return subprocess.CompletedProcess(argv, 0, "", "")
         assert argv[0].endswith("llama-completion")
         return subprocess.CompletedProcess(
@@ -420,3 +463,27 @@ def test_model_download_checks_the_pinned_hash(
     with pytest.raises(transcribe.TranscriptionError):
         model_download.download_models(tmp_path, fetch=fetch)
     assert not (tmp_path / "m.bin").exists() and not list(tmp_path.glob(".*part"))
+
+
+def test_one_crashing_section_costs_only_that_section(tmp_path: Path) -> None:
+    """whisper-cli segfaulted on an empty section (PF-136): a failing batch is retried section
+    by section; the rest of the track survives and the session is partial (media kept)."""
+    cfg = make_cfg(tmp_path)
+    session = make_session(cfg)
+    result, doc = run(session, cfg, FakeTools(crash_on={9000}))
+    texts = [u["text"] for u in doc["transcript"]]
+    assert "Ja, ich überarbeite den Ethikantrag bis zum 5. Dezember." not in texts
+    assert "Einverstanden, wir schließen die Rekrutierung bis zum 31. Januar ab." in texts
+    tracks = {t["speaker"]: t["status"] for t in doc["transcription"]["tracks"]}
+    assert tracks["local"] == "partial" and result.status == "partial"
+    assert not transcribe.processed_ok(session)
+
+
+def test_speech_regions_use_the_real_track_length() -> None:
+    stderr = "  Duration: 00:00:29.00, start: 0\nsilence_start: 2.2\nsilence_end: 7.5\n"
+
+    def runner(argv: list[str], timeout: float) -> subprocess.CompletedProcess[str]:
+        return subprocess.CompletedProcess(argv, 0, "", stderr)
+
+    regions = transcribe.speech_regions(Path("x.flac"), None, runner, 10)
+    assert regions == [(0.0, 2.45), (7.25, 29.0)]  # padded, and never past the real end
