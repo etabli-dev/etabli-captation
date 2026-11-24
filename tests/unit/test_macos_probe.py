@@ -415,3 +415,20 @@ def test_real_helper_once() -> None:
     assert out.returncode == 0, out.stderr
     reading = parse_probe_line(out.stdout)
     assert reading is not None and reading.confidence in ("high", "low")
+
+
+@pytest.mark.req("R-13")
+def test_probe_input_device_is_parsed_but_never_shown() -> None:
+    """PF-132: the UID reaches the controller; repr (logs) never shows it (Bluetooth address)."""
+    doc = {
+        "schema": 1,
+        "api": "process_objects",
+        "confidence": "high",
+        "camera_active": False,
+        "mic_users": [{"pid": 7, "name": "avconferenced", "input_device": "AA-BB-CC:input"}],
+    }
+    reading = parse_probe_line(json.dumps(doc))
+    assert reading is not None
+    user = reading.mic_users[0]
+    assert user.input_device == "AA-BB-CC:input" and "AA-BB-CC" not in repr(user)
+    assert app_ref_from({"pid": 8, "name": "zoom.us"}).input_device is None  # type: ignore[union-attr]

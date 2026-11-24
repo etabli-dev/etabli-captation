@@ -34,7 +34,7 @@ recording:
     sample_rate: 48000
     codec_preference: [pcm_s24le, flac, aac]
     tracks: { mix: 1, remote: 2, local: 3, external: null }
-    local_input: follow_default   # or the exact device name the call apps use
+    local_input: follow_call      # the call app's mic (any headset); or follow_default / a device name
     external_input_device: null   # input name of an external audio interface (see doctor)
   video:
     capture: window_preferred

@@ -53,6 +53,8 @@ public struct AppUser: Codable, Equatable, Sendable {
     public var parentPID: Int32?
     public var parentBundleID: String?
     public var parentName: String?
+    /// UID of the input device the process records from (process objects only, PF-132).
+    public var inputDevice: String?
 
     public init(
         pid: Int32,
@@ -63,7 +65,8 @@ public struct AppUser: Codable, Equatable, Sendable {
         ppid: Int32? = nil,
         parentPID: Int32? = nil,
         parentBundleID: String? = nil,
-        parentName: String? = nil
+        parentName: String? = nil,
+        inputDevice: String? = nil
     ) {
         self.pid = pid
         self.bundleID = bundleID
@@ -74,6 +77,7 @@ public struct AppUser: Codable, Equatable, Sendable {
         self.parentPID = parentPID
         self.parentBundleID = parentBundleID
         self.parentName = parentName
+        self.inputDevice = inputDevice
     }
 
     enum CodingKeys: String, CodingKey {
@@ -86,6 +90,7 @@ public struct AppUser: Codable, Equatable, Sendable {
         case parentPID = "parent_pid"
         case parentBundleID = "parent_bundle_id"
         case parentName = "parent_name"
+        case inputDevice = "input_device"
     }
 }
 

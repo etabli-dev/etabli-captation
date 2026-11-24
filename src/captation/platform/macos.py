@@ -262,6 +262,7 @@ K_PATH = "path"  # not-a-fact: probe JSON schema
 K_PARENT_PID = "parent_pid"  # not-a-fact: probe JSON schema
 K_PARENT_BUNDLE = "parent_bundle_id"  # not-a-fact: probe JSON schema
 K_PARENT_NAME = "parent_name"  # not-a-fact: probe JSON schema
+K_INPUT_DEVICE = "input_device"  # not-a-fact: probe JSON schema (PF-132)
 HIGH: Confidence = "high"  # not-a-fact: internal status value
 LOW: Confidence = "low"  # not-a-fact: internal status value
 TITLES_MISSING = "permission_missing"  # not-a-fact: probe JSON schema
@@ -354,7 +355,12 @@ def app_ref_from(raw: Any) -> AppRef | None:
     if parent_name == name:
         parent_name = None
     return AppRef(
-        pid=pid, process_name=name, exe_path=path, bundle_id=bundle, parent_app=parent_name
+        pid=pid,
+        process_name=name,
+        exe_path=path,
+        bundle_id=bundle,
+        parent_app=parent_name,
+        input_device=_str(raw.get(K_INPUT_DEVICE)),
     )
 
 

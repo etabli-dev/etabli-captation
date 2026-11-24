@@ -5,6 +5,10 @@
 //   process object kAudioProcessPropertyPID, kAudioProcessPropertyBundleID and
 //   kAudioProcessPropertyIsRunningInput. Polled: property listeners for IsRunningInput are
 //   reported not to fire (reported in Apple's developer forums), so no listener is used at all.
+// - Input device per process (PF-132): kAudioProcessPropertyDevices in the input scope, then
+//   kAudioDevicePropertyDeviceUID; the agent records the local track from that device, so any
+//   headset the call app uses is the one on the recording. The UID stays in memory (it can
+//   contain a Bluetooth address).
 // - Fallback (PF-114, confidence "low"): kAudioDevicePropertyDeviceIsRunningSomewhere on the
 //   default input device plus NSWorkspace.frontmostApplication.
 // - Camera (PF-115): kCMIODevicePropertyDeviceIsRunningSomewhere over all CoreMediaIO devices.
@@ -27,10 +31,13 @@ import Foundation
 
 let systemObject = AudioObjectID(kAudioObjectSystemObject)
 
-func audioAddress(_ selector: AudioObjectPropertySelector) -> AudioObjectPropertyAddress {
+func audioAddress(
+    _ selector: AudioObjectPropertySelector,
+    scope: AudioObjectPropertyScope = AudioObjectPropertyScope(kAudioObjectPropertyScopeGlobal)
+) -> AudioObjectPropertyAddress {
     AudioObjectPropertyAddress(
         mSelector: selector,
-        mScope: AudioObjectPropertyScope(kAudioObjectPropertyScopeGlobal),
+        mScope: scope,
         mElement: AudioObjectPropertyElement(kAudioObjectPropertyElementMain)
     )
 }
@@ -64,8 +71,12 @@ func readString(_ object: AudioObjectID, _ selector: AudioObjectPropertySelector
     return text.isEmpty ? nil : text
 }
 
-func readObjectList(_ object: AudioObjectID, _ selector: AudioObjectPropertySelector) -> [AudioObjectID]? {
-    var address = audioAddress(selector)
+func readObjectList(
+    _ object: AudioObjectID,
+    _ selector: AudioObjectPropertySelector,
+    scope: AudioObjectPropertyScope = AudioObjectPropertyScope(kAudioObjectPropertyScopeGlobal)
+) -> [AudioObjectID]? {
+    var address = audioAddress(selector, scope: scope)
     var size: UInt32 = 0
     guard AudioObjectGetPropertyDataSize(object, &address, 0, nil, &size) == noErr else { return nil }
     let itemSize = MemoryLayout<AudioObjectID>.size
@@ -156,9 +167,23 @@ func processObjectUsers(errors: inout [String]) -> [AppUser]? {
         else { continue }
         seen.insert(pid)
         let bundleID = readString(object, AudioObjectPropertySelector(kAudioProcessPropertyBundleID))
-        users.append(describe(pid: pid, bundleID: bundleID))
+        var user = describe(pid: pid, bundleID: bundleID)
+        user.inputDevice = inputDeviceUID(object)
+        users.append(user)
     }
     return users.sorted { $0.pid < $1.pid }
+}
+
+/// UID of the first input device the process records from (PF-132); nil if unreadable.
+@available(macOS 14.0, *)
+func inputDeviceUID(_ processObject: AudioObjectID) -> String? {
+    let devicesSelector = AudioObjectPropertySelector(kAudioProcessPropertyDevices)
+    let inputScope = AudioObjectPropertyScope(kAudioObjectPropertyScopeInput)
+    guard let devices = readObjectList(processObject, devicesSelector, scope: inputScope) else {
+        return nil
+    }
+    let uidSelector = AudioObjectPropertySelector(kAudioDevicePropertyDeviceUID)
+    return devices.lazy.compactMap { readString($0, uidSelector) }.first
 }
 
 /// Default input device running somewhere (PF-114); nil if unreadable.

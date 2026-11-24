@@ -71,7 +71,7 @@ class AudioConfig(_Strict):
     codec_preference: list[Literal["pcm_s24le", "pcm_s16le", "flac", "alac", "aac"]]
     tracks: TracksConfig
     external_input_device: str | None = None
-    local_input: str = "follow_default"
+    local_input: str = "follow_call"
 
 
 class VideoConfig(_Strict):

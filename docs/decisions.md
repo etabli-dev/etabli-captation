@@ -341,3 +341,21 @@ Decided by the maintainer once the Linux build was complete.
 - **Consequences:** R-09, R-17, R-53 and R-61; tests in `tests/unit/test_session_hardening.py`
   and `tests/unit/test_hardening_paths.py`.
 
+## ADR-020 — The local track follows the call app's microphone (2026-11-24)
+
+- **Context:** the owner uses different headsets (wired, USB, Bluetooth/AirPods) and switches
+  them during calls. The local track recorded the system default input, so a call app set to
+  another microphone, or a headset connected mid-call, gave a wrong or silent local track (L-08).
+  The remote track is not affected: it is captured from the app (ScreenCaptureKit), before any
+  output device.
+- **Decision (accepted):** new `recording.audio.local_input` value `follow_call`, the default.
+  On macOS `captation-probe` reports the input device each mic user records from (PF-132); OBS's
+  `Captation Local` is created on that device and switched with `SetInputSettings` when the call
+  app changes devices during the recording (same segment, no restart). Where no device is
+  reported (Linux, Windows, macOS < 14) the default input is used, as before. A device OBS does
+  not list falls back to the default input with `local:call_device_not_found`. The device UID
+  stays in memory: it is not logged and not written to `session.json` (a Bluetooth UID can
+  contain the device's address, principles §3).
+- **Consequences:** R-13, L-04, L-08, PF-132; `follow_default` and device names keep working.
+- **Verify-by:** unit tests (controller, agent, probe parser), probe `swift test`, live check on
+  macOS against OBS 33.0.3.

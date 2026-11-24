@@ -22,7 +22,7 @@ from typing import Any, Protocol
 
 from captation import postprocess, session, storage, terms
 from captation.config import Config
-from captation.models import AppRef, EncryptionStatus, Mode
+from captation.models import AppRef, CallContext, EncryptionStatus, Mode
 from captation.obs.client import ObsConnectionError, ObsError
 from captation.obs.client import ObsLost as ObsLostError
 from captation.obs.controller import ObsInfo, PreparedSegment
@@ -98,6 +98,8 @@ class ObsDriver(Protocol):
     def start_segment(self, record_dir: Any, basename: str) -> None: ...
 
     def stop_segment(self, timeout_s: float = 20) -> Any: ...
+
+    def follow_local_device(self, device: str | None) -> bool: ...
 
     def teardown_segment(self) -> None: ...
 
@@ -214,6 +216,8 @@ class Agent:
             except Exception as exc:
                 log.exception("executor: %s failed", type(cmd).__name__)
                 self._on_command_failed(cmd, exc)
+        if isinstance(event, Tick) and not commands:
+            self._follow_call_device(event.context)
         idle = self.machine.state in (State.ARMED_IDLE, State.PENDING_START)
         if self._indicator_lost and idle and not self._tray_ok():
             # ADR-014: no new recording without a visible indicator.
@@ -227,6 +231,23 @@ class Agent:
             commands = [*commands, *extra]
         self._refresh_tray()
         return commands
+
+    def _follow_call_device(self, ctx: CallContext | None) -> None:
+        """``local_input: follow_call``: keep the local track on the mic the call app uses,
+        also when a headset connects or disconnects during the call (PF-132)."""
+        if ctx is None or self.machine.state not in (State.RECORDING, State.PENDING_STOP):
+            return
+        if ctx.app_id != self.machine.current_app_id:
+            return
+        try:
+            with self._obs_lock:
+                changed = self.d.obs.follow_local_device(ctx.capture_target.input_device)
+        except (ObsError, OSError) as exc:
+            log.warning("local track: input switch failed: %s", type(exc).__name__)
+            return
+        if changed:
+            # The device UID is never logged (it can contain a Bluetooth address).
+            log.info("local track follows the input device of %s", ctx.app_id)
 
     def _on_command_failed(self, cmd: Any, exc: BaseException | None = None) -> None:
         """Feed executor failures back into the state machine (no false indicator)."""

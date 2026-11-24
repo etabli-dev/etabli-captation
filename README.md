@@ -125,10 +125,13 @@ uv run python tools/check_facts.py && uv run python tools/licence_gate.py
    captation install-autostart      # startet Captation bei der Anmeldung – immer deaktiviert
    captation doctor                 # prüft alles; 0 = ok, 1 = Hinweise, 2 = Fehler
    ```
-7. **Headset:** ein kabelgebundenes Headset verwenden. Über Lautsprecher gelangen die Stimmen der
-   Gegenseite in die eigene Mikrofonspur (Echo); Bluetooth-Headsets wechseln bei geöffnetem
-   Mikrofon in ein Profil mit deutlich schlechterer Tonqualität. `recording.audio.local_input`
-   muss das Mikrofon sein, das auch die Anruf-App verwendet.
+7. **Headset:** jedes Headset funktioniert (Kabel, USB, Bluetooth, AirPods). Auf dem Mac nimmt
+   Captation die eigene Spur von dem Mikrofon auf, das die Anruf-App gerade verwendet, auch wenn
+   während des Gesprächs ein Headset verbunden oder abgenommen wird (`local_input: follow_call`).
+   Über Lautsprecher gelangen die Stimmen der Gegenseite in die eigene Spur (Echo);
+   Bluetooth-Headsets wechseln bei geöffnetem Mikrofon in ein Profil mit schlechterer
+   Tonqualität. Die beste Qualität bringt ein Kabel- oder USB-Headset. Unter Linux und Windows
+   `recording.audio.local_input` auf das Mikrofon der Anruf-App setzen.
 
 ### 2. Aufnehmen
 

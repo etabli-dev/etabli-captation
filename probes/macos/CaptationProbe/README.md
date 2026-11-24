@@ -102,7 +102,8 @@ One JSON object per line (keys sorted, `null` fields omitted). JSON Schema (2020
         "ppid": { "type": "integer" },
         "parent_pid": { "type": "integer", "description": "helpers: first non-helper ancestor" },
         "parent_bundle_id": { "type": "string" },
-        "parent_name": { "type": "string" }
+        "parent_name": { "type": "string" },
+        "input_device": { "type": "string", "description": "UID of the input device it records from (process objects only); never logged" }
       }
     }
   }

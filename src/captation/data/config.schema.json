@@ -216,8 +216,8 @@
             "local_input": {
               "type": "string",
               "minLength": 1,
-              "default": "follow_default",
-              "description": "'follow_default' or an input device name; it must match the device the call app uses (QC detects a mismatch)"
+              "default": "follow_call",
+              "description": "'follow_call' (the input device the call app records from, where the OS reports it; else the default input), 'follow_default' (the system default input) or an input device name"
             }
           }
         },

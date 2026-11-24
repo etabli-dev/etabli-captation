@@ -164,7 +164,7 @@ leaves no media file; arming is refused while the exposure policy is unmet.
 | Input | Source | Tracks |
 |---|---|---|
 | `Captation Remote` | per-app capture of `capture_target` (fallback: desktop audio, warning) | 1 + `tracks.remote` |
-| `Captation Local` | `recording.audio.local_input`: `follow_default`, or a device name (it must match the device the call app uses; QC catches a mismatch) | 1 + `tracks.local` |
+| `Captation Local` | `recording.audio.local_input`: `follow_call` (the device the call app records from, macOS PF-132; else the default input), `follow_default`, or a device name (it must match the device the call app uses; QC catches a mismatch) | 1 + `tracks.local` |
 | `Captation External` | optional `external_input_device` (e.g. a USB audio interface) | 1 + `tracks.external` |
 
 Track 1 is always the mix.
@@ -205,6 +205,7 @@ and updated at every state change.
 | `qc:failed:<role>:<segNN>` | QC of one file could not run |
 | `remote:desktop_fallback` | The call app could not be captured per application; the remote track holds desktop audio |
 | `local:device_not_found` | `recording.audio.local_input` names a device OBS does not offer; the local track follows the default input |
+| `local:call_device_not_found` | `follow_call`: OBS does not offer the device the call app records from; the local track follows the default input |
 | `external:device_not_found` | `recording.audio.external_input_device` was not found; no external track was recorded |
 | `capture:display_fallback` | Video mode with `window_preferred`, but the screen (not the meeting window) was captured |
 | `capture:not_approved` | No screen capture available (Wayland: not yet approved with `captation obs approve-screen`); the video is black |

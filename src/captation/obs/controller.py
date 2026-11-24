@@ -154,6 +154,7 @@ class ObsController:
         self._info: ObsInfo | None = None
         self._recording_expected = False
         self._cap = kinds.capture_profile(os_name)
+        self._local_device: str | None = None  # device UID the local track follows (in memory)
 
     # ---- connection --------------------------------------------------------------------
 
@@ -289,6 +290,30 @@ class ObsController:
                 return str(item["itemValue"])
         return None
 
+    def _apply_local_device(self, device: str) -> bool:
+        """Point ``Captation Local`` at ``device`` (a UID OBS lists); False if OBS lacks it."""
+        value = self._resolve_device(LOCAL, device)
+        if value is None:
+            return False
+        self._req(
+            "SetInputSettings",
+            {"inputName": LOCAL, "inputSettings": {self._cap.mic_device_property: value}},
+        )
+        self._local_device = device
+        return True
+
+    def follow_local_device(self, device: str | None) -> bool:
+        """``follow_call`` during a recording: the call app switched its input (a headset
+        connected or was removed). Changes the device of the running input, so the recording
+        goes on without a gap. True if the device changed."""
+        if self.cfg.recording.audio.local_input != "follow_call" or not self._recording_expected:
+            return False
+        if device is None or device == self._local_device:
+            return False
+        if LOCAL not in self._captation_inputs():
+            return False
+        return self._apply_local_device(device)
+
     def _create_audio(self, scene: str, name: str, kind: str, settings: dict[str, Any]) -> None:
         R = self._req
         R(
@@ -378,7 +403,13 @@ class ObsController:
         if mic_kind is None:
             raise ObsError("no microphone input kind available in this OBS")
         self._create_audio(scene, LOCAL, mic_kind, {cap.mic_device_property: cap.mic_default})
-        if audio.local_input != "follow_default":
+        self._local_device = None
+        if audio.local_input == "follow_call":
+            # The mic the call app records from (any headset), else the default input.
+            device = target.input_device if target is not None else None
+            if device is not None and not self._apply_local_device(device):
+                warnings.append("local:call_device_not_found")
+        elif audio.local_input != "follow_default":
             device = self._resolve_device(LOCAL, audio.local_input)
             if device is None:
                 warnings.append("local:device_not_found")
@@ -559,6 +590,7 @@ class ObsController:
             if token:
                 self._tokens.save(str(token))
         self._remove_inputs(names)
+        self._local_device = None
 
     def reset(self) -> None:
         """Best effort: stop a Captation recording and remove Captation inputs (recovery).

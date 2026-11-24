@@ -313,7 +313,9 @@ def run_checks(cfg: Config, *, ui_probe: bool = True) -> list[Check]:
         )
 
     # local input
-    if cfg.recording.audio.local_input != "follow_default":
+    if cfg.recording.audio.local_input == "follow_call":
+        add(Check("local_input", "ok", "follows the microphone the call app uses"))
+    elif cfg.recording.audio.local_input != "follow_default":
         add(
             Check(
                 "local_input",

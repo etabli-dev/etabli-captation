@@ -487,3 +487,24 @@ def test_probe_helper_stops_while_disarmed(rig: Rig) -> None:
     arm(rig)
     rig.tick(n=1)
     assert rig.probe.calls == calls + 1  # started again with the next armed poll
+
+
+@pytest.mark.req("R-13")
+def test_local_track_follows_the_headset_during_the_call(
+    rig: Rig, caplog: pytest.LogCaptureFixture
+) -> None:
+    from dataclasses import replace
+
+    arm(rig)
+    rig.probe.mic = (replace(CALL, input_device="alsa_input.headset"),)
+    rig.tick(n=4)
+    rig.tick(n=6)
+    assert rig.state is State.RECORDING
+    local = rig.fake_obs.inputs["Captation Local"]["settings"]
+    assert local["device_id"] == "alsa_input.headset"
+    # the headset is taken off: the call app falls back to the built-in microphone
+    rig.probe.mic = (replace(CALL, input_device="default"),)
+    rig.tick()
+    assert rig.fake_obs.inputs["Captation Local"]["settings"]["device_id"] == "default"
+    assert rig.state is State.RECORDING and rig.fake_obs.names().count("StartRecord") == 1
+    assert "alsa_input.headset" not in caplog.text  # device UIDs are never logged

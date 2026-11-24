@@ -28,7 +28,7 @@ Test levels: **unit** (no OBS, no OS state), **integration** (`obs` marker, real
 |---|---|---|---|
 | R-11 | Track 1 is the mix. Remote, local and external use their configured, unique track numbers. Each Captation input is routed to track 1 plus its role track only | §7 | unit, integration |
 | R-12 | `Captation Remote` captures the call app per application. If that is impossible, desktop audio is used and a warning is recorded | §7 | unit, integration |
-| R-13 | `Captation Local` follows the default input or a named device. An unresolvable name falls back to the default device with a warning | §7 | unit, integration |
+| R-13 | `Captation Local` follows the input device the call app records from (`follow_call`, default; where the OS reports it, macOS PF-132), also when the call app switches devices during the call, else the default input; or the default input (`follow_default`) or a named device. An unresolvable device falls back to the default device with a warning | §7 | unit, integration |
 
 ## Consent guard (docs/principles.md §2)
 

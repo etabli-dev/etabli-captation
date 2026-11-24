@@ -400,3 +400,52 @@ def test_record_directory_is_absolute(tmp_path: Path, monkeypatch: pytest.Monkey
     monkeypatch.chdir(tmp_path)
     ctl.start_segment(Path("rel") / "rec", "seg01_container")
     assert fake.record_dir == str((tmp_path / "rel" / "rec").resolve())
+
+
+@pytest.mark.req("R-13")
+def test_local_track_uses_the_call_apps_input_device(tmp_path: Path) -> None:
+    """follow_call (default): the mic the call app records from, e.g. a headset (PF-132)."""
+    ctl, fake = make(tmp_path)
+    assert ctl.cfg.recording.audio.local_input == "follow_call"
+    headset = AppRef(pid=0, process_name="signal", input_device="alsa_input.headset")
+    prepared = ctl.prepare_segment("audio", headset)
+    assert fake.inputs["Captation Local"]["settings"]["device_id"] == "alsa_input.headset"
+    assert "local:call_device_not_found" not in prepared.warnings
+    ctl.teardown_segment()
+    # no device reported (other OS, older macOS): the default input, no warning
+    prepared = ctl.prepare_segment("audio", AppRef(pid=0, process_name="signal"))
+    assert fake.inputs["Captation Local"]["settings"]["device_id"] == "default"
+    assert not [w for w in prepared.warnings if w.startswith("local:")]
+    ctl.teardown_segment()
+    # a device OBS does not list: default input plus a warning
+    unknown = AppRef(pid=0, process_name="signal", input_device="gone")
+    prepared = ctl.prepare_segment("audio", unknown)
+    assert fake.inputs["Captation Local"]["settings"]["device_id"] == "default"
+    assert "local:call_device_not_found" in prepared.warnings
+
+
+@pytest.mark.req("R-13")
+def test_local_track_follows_a_device_switch_during_the_recording(tmp_path: Path) -> None:
+    ctl, fake = make(tmp_path)
+    ctl.prepare_segment("audio", AppRef(pid=0, process_name="signal", input_device="default"))
+    assert ctl.follow_local_device("alsa_input.headset") is False  # not recording yet
+    ctl.start_segment(tmp_path / "rec", "seg01_container")
+    assert ctl.follow_local_device("alsa_input.headset") is True  # headset connected
+    assert fake.inputs["Captation Local"]["settings"]["device_id"] == "alsa_input.headset"
+    assert ctl.follow_local_device("alsa_input.headset") is False  # unchanged
+    assert ctl.follow_local_device(None) is False  # nothing reported: keep the device
+    assert ctl.follow_local_device("gone") is False  # unknown: keep the device
+    assert fake.inputs["Captation Local"]["settings"]["device_id"] == "alsa_input.headset"
+    assert fake.recording and fake.names().count("StartRecord") == 1  # no restart, no gap
+
+
+@pytest.mark.req("R-13")
+def test_follow_default_ignores_the_call_device(tmp_path: Path) -> None:
+    cfg = cfg_with(tmp_path)
+    audio = cfg.recording.audio.model_copy(update={"local_input": "follow_default"})
+    cfg = cfg.model_copy(update={"recording": cfg.recording.model_copy(update={"audio": audio})})
+    ctl, fake = make(tmp_path, cfg=cfg)
+    ctl.prepare_segment("audio", AppRef(pid=0, process_name="x", input_device="alsa_input.headset"))
+    ctl.start_segment(tmp_path / "rec", "seg01_container")
+    assert fake.inputs["Captation Local"]["settings"]["device_id"] == "default"
+    assert ctl.follow_local_device("alsa_input.headset") is False

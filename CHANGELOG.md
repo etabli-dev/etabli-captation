@@ -17,6 +17,9 @@ All notable changes are documented here. The format follows
 - Unit tests and type checks run on macOS and Windows CI as well (Linux-only modules are skipped).
 
 ### Added
+- Any headset (ADR-020): on macOS the local track records the microphone the call app uses and
+  follows a headset that connects or disconnects during the call (`local_input: follow_call`,
+  default; PF-132).
 - App coverage (ADR-018, R-60, `docs/app-coverage.md`): FaceTime and iPhone calls on the Mac,
   Windows Phone Link, Cisco Jabber, GoTo, Discord, Slack, Element and SIP softphones; WhatsApp
   clients for Linux by Flatpak app ID; browser pages of Teams, Google Meet, Zoom, Webex,

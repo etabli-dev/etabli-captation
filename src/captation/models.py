@@ -35,6 +35,9 @@ class AppRef:
     bundle_id: str | None = None
     package_id: str | None = None
     parent_app: str | None = None
+    # UID of the input device the process records from, where the OS reports it (macOS,
+    # PF-132). In memory only: a Bluetooth headset's UID can contain its hardware address.
+    input_device: str | None = field(default=None, repr=False)
 
 
 @dataclass(frozen=True)

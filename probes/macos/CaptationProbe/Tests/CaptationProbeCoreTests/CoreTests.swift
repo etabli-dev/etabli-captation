@@ -45,6 +45,20 @@ final class CoreTests: XCTestCase {
         XCTAssertEqual(users.first?["bundle_id"] as? String, "us.zoom.xos")
         XCTAssertNil(users.first?["parent_bundle_id"])
         XCTAssertEqual((doc["camera_users"] as? [Any])?.count, 0)
+        XCTAssertNil(users.first?["input_device"])
+    }
+
+    func testInputDeviceIsEncoded() throws {
+        let user = AppUser(pid: 7, bundleID: "com.apple.avconferenced", inputDevice: "dev-uid")
+        let output = ProbeOutput(
+            ts: 1, macos: "27.0.1", api: API.processObjects, confidence: Confidence.high,
+            micUsers: [user], micDeviceRunning: true, cameraActive: false
+        )
+        let doc = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: try encodeLine(output)) as? [String: Any]
+        )
+        let users = try XCTUnwrap(doc["mic_users"] as? [[String: Any]])
+        XCTAssertEqual(users.first?["input_device"] as? String, "dev-uid")
     }
 
     func testOptions() {
