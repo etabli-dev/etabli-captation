@@ -8,9 +8,14 @@ installed later) and runs the media retention; the retention repeats every few h
 
 from __future__ import annotations
 
+import contextlib
 import logging
+import os
 import queue
+import shutil
+import signal
 import subprocess
+import tempfile
 import threading
 import time
 from collections.abc import Callable
@@ -24,10 +29,17 @@ log = logging.getLogger(__name__)
 
 PAUSE_POLL_S = 5.0
 RETENTION_EVERY_S = 6 * 3600.0
+TOOL_POLL_S = 1.0
+# Pausing needs POSIX job-control signals; on Windows a tool simply keeps running.
+SIGSTOP: int | None = getattr(signal, "SIGSTOP", None)
+SIGCONT: int | None = getattr(signal, "SIGCONT", None)
+SIGKILL: int = getattr(signal, "SIGKILL", signal.SIGTERM)
+STALE_TEMP_S = 24 * 3600.0  # temp folders of a killed run (they hold transcript text)
 
 
-class _Stopped(Exception):
-    """The agent shuts down: leave the session for the next start."""
+class _Stopped(BaseException):
+    """The agent shuts down: leave the session for the next start. A BaseException, so the
+    pipeline's "record any error as failed" handler never swallows a shutdown."""
 
 
 class TranscriptionWorker:
@@ -70,16 +82,44 @@ class TranscriptionWorker:
     def stop(self, timeout_s: float = 15.0) -> None:
         self._stop.set()
         self._queue.put(None)
-        proc = self._proc
-        if proc is not None and proc.poll() is None:
-            proc.terminate()
+        with self._lock:
+            proc = self._proc
+        if proc is not None:
+            self._signal(proc, SIGCONT)  # a paused tool must be able to exit
+            self._signal(proc, signal.SIGTERM)
         if self._thread is not None:
             self._thread.join(timeout_s)
+
+    @staticmethod
+    def _signal(proc: subprocess.Popen[str], sig: int | None) -> None:
+        """To the tool's own process group (``nice`` execs the tool in place)."""
+        if sig is None or proc.poll() is not None:
+            return
+        killpg = getattr(os, "killpg", None)
+        try:
+            if killpg is None:
+                raise OSError("no process groups")
+            killpg(proc.pid, sig)
+        except OSError:
+            with contextlib.suppress(OSError):
+                if sig == SIGKILL:
+                    proc.kill()
+                else:
+                    proc.send_signal(sig)
 
     def idle(self) -> bool:
         return self._queue.empty() and self._proc is None and not self._queued
 
     # ---- the thread -----------------------------------------------------------------------
+
+    @staticmethod
+    def _remove_stale_temp() -> None:
+        base = Path(tempfile.gettempdir())
+        cutoff = time.time() - STALE_TEMP_S
+        for path in base.glob("captation-transcript-*"):
+            with contextlib.suppress(OSError):
+                if path.is_dir() and not path.is_symlink() and path.stat().st_mtime < cutoff:
+                    shutil.rmtree(path)
 
     def _catch_up(self) -> None:
         for session_dir in storage.iter_session_dirs(self.cfg.data_root_path):
@@ -102,10 +142,13 @@ class TranscriptionWorker:
             raise _Stopped
 
     def _run_tool(self, argv: list[str], timeout: float) -> subprocess.CompletedProcess[str]:
+        """Run one tool. While a call is recorded the tool is frozen (SIGSTOP) and resumed
+        afterwards (SIGCONT): it never competes with a recording, also not on the GPU. The
+        timeout counts running time only."""
         if self._stop.is_set():
             raise _Stopped
         proc = subprocess.Popen(
-            [transcribe.NICE, "-n", transcribe.NICE_LEVEL, *argv],
+            transcribe.niced(argv),
             stdin=subprocess.DEVNULL,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
@@ -113,20 +156,54 @@ class TranscriptionWorker:
             errors="replace",
             start_new_session=True,
         )
-        self._proc = proc
+        with self._lock:
+            self._proc = proc
+        out: list[str] = []
+        err: list[str] = []
         try:
-            out, err = proc.communicate(timeout=timeout)
-        except subprocess.TimeoutExpired:
-            proc.kill()
-            proc.communicate()
-            raise
+            if self._stop.is_set():  # stop() ran before _proc was set
+                self._signal(proc, signal.SIGTERM)
+            readers = [
+                threading.Thread(target=lambda: out.append(proc.stdout.read()), daemon=True),  # type: ignore[union-attr]
+                threading.Thread(target=lambda: err.append(proc.stderr.read()), daemon=True),  # type: ignore[union-attr]
+            ]
+            for r in readers:
+                r.start()
+            used = 0.0
+            paused = False
+            while proc.poll() is None:
+                if self._stop.is_set():
+                    self._signal(proc, SIGCONT)
+                    self._signal(proc, signal.SIGTERM)
+                    proc.wait(10)
+                    break
+                busy = self._busy()
+                if busy and not paused:
+                    self._signal(proc, SIGSTOP)
+                    paused = True
+                elif not busy and paused:
+                    self._signal(proc, SIGCONT)
+                    paused = False
+                time.sleep(TOOL_POLL_S)
+                if not paused:
+                    used += TOOL_POLL_S
+                if used > timeout:
+                    self._signal(proc, SIGKILL)
+                    proc.wait(10)
+                    raise subprocess.TimeoutExpired(argv, timeout)
+            for r in readers:
+                r.join(10)
         finally:
-            self._proc = None
+            with self._lock:
+                self._proc = None
+            if proc.poll() is None:
+                self._signal(proc, SIGKILL)
         if self._stop.is_set():
             raise _Stopped
-        return subprocess.CompletedProcess(argv, proc.returncode, out, err)
+        return subprocess.CompletedProcess(argv, proc.returncode, "".join(out), "".join(err))
 
     def _run(self) -> None:
+        self._remove_stale_temp()
         try:
             self._catch_up()
         except Exception:

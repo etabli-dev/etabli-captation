@@ -73,6 +73,7 @@ class FakeTools:
         *,
         whisper_fail: set[str] = frozenset(),
         crash_on: set[int] = frozenset(),
+        silent: set[str] = frozenset(),
         llama_exit: int = 0,
         language: str = "de",
     ) -> None:
@@ -80,6 +81,7 @@ class FakeTools:
         self.llama = LLAMA if llama is None else llama
         self.whisper_fail = whisper_fail
         self.crash_on = crash_on  # utterance start times (ms) whose section crashes whisper
+        self.silent = silent  # speakers whose track is digitally silent
         self.llama_exit = llama_exit
         self.language = language
         self.cuts: dict[str, tuple[str, float]] = {}
@@ -91,8 +93,13 @@ class FakeTools:
     def __call__(self, argv: list[str], timeout: float) -> subprocess.CompletedProcess[str]:
         self.calls.append(argv)
         if argv[0] == "ffmpeg" and "-af" in argv:  # silencedetect
-            utt = WHISPER[self._speaker(argv[argv.index("-i") + 1])]
+            speaker = self._speaker(argv[argv.index("-i") + 1])
             lines = ["  Duration: 00:00:12.00, start: 0.000000, bitrate: 500 kb/s"]
+            if speaker in self.silent:
+                return subprocess.CompletedProcess(
+                    argv, 0, "", "\n".join([*lines, "silence_start: 0"])
+                )
+            utt = WHISPER[speaker]
             cursor = 0
             for a, b, _ in utt:
                 if a > cursor:
@@ -189,6 +196,9 @@ def make_session(
         )
         files.append({"role": role, "path": f"seg01_{role}.flac", "sha256": "ab" * 32, "qc": qc})
     (d / "seg01_container.mkv").write_bytes(b"mkv")
+    files.append(
+        {"role": "container", "path": "seg01_container.mkv", "sha256": "cd" * 32, "qc": None}
+    )
     doc = {
         "schema_version": 1,
         "session_id": SID,
@@ -282,10 +292,13 @@ def test_the_users_language_is_used_for_the_other_side(tmp_path: Path) -> None:
 def test_silent_and_failed_tracks(tmp_path: Path) -> None:
     cfg = make_cfg(tmp_path)
     session = make_session(cfg, remote_qc={"rms_dbfs": -91.0, "silent_ratio": 1.0})
-    tools = FakeTools()
+    tools = FakeTools(silent={"remote"})
     _, doc = run(session, cfg, tools)
     tracks = {t["speaker"]: t["status"] for t in doc["transcription"]["tracks"]}
     assert tracks == {"local": "ok", "remote": "silent"}  # silence is never sent to Whisper
+    assert not any(
+        "seg01_remote" in " ".join(c) for c in tools.calls if c[0].endswith("whisper-cli")
+    )
     assert doc["status"] == "complete" and {u["speaker"] for u in doc["transcript"]} == {"local"}
     cfg2 = make_cfg(tmp_path / "b")
     session2 = make_session(cfg2)
@@ -351,12 +364,72 @@ def test_fix_deadline(value: str | None, expected: str | None) -> None:
     assert transcribe.fix_deadline(value, date(2026, 11, 24)) == expected
 
 
-def test_supported_quotes() -> None:
-    corpus = transcribe._norm("Ja, ich überarbeite den Ethikantrag bis zum 5. Dezember.")
-    words = set(corpus.split())
-    assert transcribe.supported("ich überarbeite den Ethikantrag", corpus, words)
-    assert not transcribe.supported("Wir fliegen nach Rom", corpus, words)
-    assert not transcribe.supported("", corpus, words)
+def _windows(*texts: str) -> list[list[str]]:
+    utts = [
+        transcribe.Utterance(float(n), float(n) + 1, "local", t, 1) for n, t in enumerate(texts)
+    ]
+    return transcribe.evidence_windows(utts)
+
+
+def test_evidence_guard() -> None:
+    w = _windows(
+        "Ja, ich überarbeite den Ethikantrag bis zum 5. Dezember.",
+        "Und wir schreiben das Protokoll morgen.",
+    )
+    assert transcribe.supported("ich überarbeite den Ethikantrag", w)
+    assert transcribe.supported("[00:00:30] Ich: Ja, ich überarbeite den Ethikantrag", w)  # prefix
+    assert transcribe.supported("Ethikantrag bis zum 5. Dezember. Und wir schreiben", w)  # 2 turns
+    assert not transcribe.supported("ich", w)  # too short
+    assert not transcribe.supported("koll morgen", w)  # part of a word
+    # words of the call, but not in that order in one place (review 2026-11-24)
+    assert not transcribe.supported("wir überarbeiten das Protokoll bis Dezember morgen", w)
+    assert not transcribe.supported("Wir fliegen nach Rom", w)
+
+
+def test_urgency_only_as_said() -> None:
+    utts = [
+        transcribe.Utterance(0, 1, "remote", "Kannst du das Protokoll schicken? Keine Eile.", 1),
+        transcribe.Utterance(2, 3, "remote", "Den Antrag bitte sofort, das ist dringend.", 1),
+    ]
+    assert transcribe.urgency_as_said("hoch", "Kannst du das Protokoll schicken", utts) is None
+    assert (
+        transcribe.urgency_as_said("niedrig", "Kannst du das Protokoll schicken", utts) == "niedrig"
+    )
+    assert transcribe.urgency_as_said("hoch", "Den Antrag bitte sofort", utts) is None  # neighbour
+    lone = [utts[1]]
+    assert transcribe.urgency_as_said("hoch", "Den Antrag bitte sofort", lone) == "hoch"
+    assert transcribe.urgency_as_said("niedrig", "Den Antrag bitte sofort", lone) is None
+
+
+def test_missing_track_blocks_complete(tmp_path: Path) -> None:
+    """Post-processing left a segment without its remote track: never complete (review)."""
+    cfg = make_cfg(tmp_path)
+    session = make_session(cfg)
+    (session / "seg01_remote.flac").unlink()
+    result, _ = run(session, cfg, FakeTools())
+    assert result.status == "partial" and not transcribe.processed_ok(session)
+
+
+def test_unexpected_errors_are_recorded_not_retried(tmp_path: Path) -> None:
+    cfg = make_cfg(tmp_path)
+    session = make_session(cfg)
+
+    def broken(argv: list[str], timeout: float) -> subprocess.CompletedProcess[str]:
+        raise subprocess.TimeoutExpired(argv, timeout)
+
+    result, doc = run(session, cfg, broken)  # type: ignore[arg-type]
+    assert result.status == "failed" and doc["status"] == "failed"
+    assert not transcribe.needs_processing(session)  # not redone at every start
+
+
+def test_odd_model_output_is_ignored(tmp_path: Path) -> None:
+    cfg = make_cfg(tmp_path)
+    session = make_session(cfg)
+    odd = {"summary": None, "agreements": ["text only"], "todos": [None, {"task": 5}]}
+    result, doc = run(session, cfg, FakeTools(odd))
+    s = doc["summary"]
+    assert s["text"] == "" and s["agreements"] == [] and s["todos"] == []
+    assert s["dropped_unsupported"] == 3 and result.status == "complete"
 
 
 # ---- media retention (ADR-023) -------------------------------------------------------------
@@ -487,3 +560,85 @@ def test_speech_regions_use_the_real_track_length() -> None:
 
     regions = transcribe.speech_regions(Path("x.flac"), None, runner, 10)
     assert regions == [(0.0, 2.45), (7.25, 29.0)]  # padded, and never past the real end
+
+
+@pytest.mark.req("R-63")
+def test_retention_deletes_only_listed_media(tmp_path: Path) -> None:
+    cfg = make_cfg(tmp_path)
+    session = make_session(cfg)
+    run(session, cfg, FakeTools())
+    (session / "notes.txt").write_text("the owner's own note", encoding="utf-8")
+    outside = tmp_path / "outside.flac"
+    outside.write_bytes(b"x")
+    outside.chmod(0o444)
+    (session / "seg01_mix.flac").unlink()
+    (session / "seg01_mix.flac").symlink_to(outside)  # listed name, but a symlink
+    old = datetime(2027, 6, 1, tzinfo=datetime.now().astimezone().tzinfo)
+    assert storage.apply_media_retention(cfg, old) == [SID]
+    names = sorted(p.name for p in session.iterdir())
+    assert names == ["notes.txt", "processed", "seg01_mix.flac", "session.json"]
+    assert outside.exists() and not outside.stat().st_mode & 0o200  # not followed, not chmodded
+
+
+def test_retention_needs_the_transcript_of_this_session(tmp_path: Path) -> None:
+    cfg = make_cfg(tmp_path)
+    session = make_session(cfg)
+    run(session, cfg, FakeTools())
+    t = session / "processed" / "transcript.json"
+    doc = json.loads(t.read_text(encoding="utf-8"))
+    doc["session"]["session_id"] = "S-20260101-000000-zzzz"
+    t.chmod(0o600)
+    t.write_text(json.dumps(doc), encoding="utf-8")
+    old = datetime(2027, 6, 1, tzinfo=datetime.now().astimezone().tzinfo)
+    assert storage.apply_media_retention(cfg, old) == []
+    assert (session / "seg01_local.flac").exists()
+
+
+@pytest.mark.skipif(not hasattr(__import__("signal"), "SIGSTOP"), reason="POSIX job control")
+def test_a_running_tool_is_frozen_during_a_call(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from captation import transcribe_worker
+
+    monkeypatch.setattr(transcribe_worker, "TOOL_POLL_S", 0.05)
+    cfg = make_cfg(tmp_path)
+    busy = threading.Event()
+    worker = TranscriptionWorker(cfg, busy.is_set)
+    result: dict[str, Any] = {}
+
+    def go() -> None:
+        result["r"] = worker._run_tool(["/bin/sh", "-c", "sleep 0.6; echo done"], 30)
+
+    thread = threading.Thread(target=go)
+    thread.start()
+    time.sleep(0.15)
+    busy.set()  # a call starts: the tool is frozen
+    time.sleep(1.5)
+    assert thread.is_alive()  # it would have finished after 0.6 s
+    busy.clear()
+    thread.join(5)
+    assert result["r"].returncode == 0 and result["r"].stdout.strip() == "done"
+
+
+def test_stop_ends_a_running_tool(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from captation import transcribe_worker
+
+    monkeypatch.setattr(transcribe_worker, "TOOL_POLL_S", 0.05)
+    cfg = make_cfg(tmp_path)
+    worker = TranscriptionWorker(cfg, lambda: False)
+    errors: list[BaseException] = []
+
+    def go() -> None:
+        try:
+            worker._run_tool(["/bin/sh", "-c", "sleep 30"], 60)
+        except BaseException as exc:  # _Stopped is a BaseException on purpose
+            errors.append(exc)
+
+    thread = threading.Thread(target=go)
+    thread.start()
+    time.sleep(0.3)
+    started = time.monotonic()
+    worker.stop()
+    thread.join(5)
+    assert not thread.is_alive() and time.monotonic() - started < 5
+    assert errors and type(errors[0]).__name__ == "_Stopped"

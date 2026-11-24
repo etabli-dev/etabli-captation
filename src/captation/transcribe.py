@@ -31,6 +31,8 @@ import unicodedata
 from collections.abc import Callable, Iterable
 from dataclasses import asdict, dataclass, field
 from datetime import date, datetime
+from difflib import SequenceMatcher
+from itertools import pairwise
 from pathlib import Path
 from typing import Any, Literal
 
@@ -48,11 +50,8 @@ Speaker = Literal["local", "remote"]
 SPEAKERS: tuple[Speaker, ...] = ("local", "remote")
 NICE = "/usr/bin/nice"  # PF-136: lower priority, so a running call is never starved
 NICE_LEVEL = "10"
-# A track this quiet is not transcribed: Whisper invents text in silence (PF-136).
-SILENT_RMS_DBFS = -70.0
-SILENT_RATIO = 0.98
-# llama.cpp budget: ~3.2 characters per token for German/English text (conservative).
-CHARS_PER_TOKEN = 3.2
+# llama.cpp budget per part (review 2026-11-24: 3.2 overflowed the context).
+CHARS_PER_TOKEN = 2.4  # timestamps and digits are one token each (Qwen2)
 PROMPT_RESERVE_TOKENS = 1500
 URGENCIES = ("hoch", "mittel", "niedrig")
 
@@ -128,11 +127,17 @@ def missing_tools(tc: TranscriptionConfig) -> list[str]:
     return missing
 
 
+def niced(argv: list[str]) -> list[str]:
+    """Lower priority where ``nice`` exists (not on Windows)."""
+    return [NICE, "-n", NICE_LEVEL, *argv] if os.path.exists(NICE) else argv
+
+
 def _default_runner(argv: list[str], timeout: float) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
-        [NICE, "-n", NICE_LEVEL, *argv],
+        niced(argv),
         capture_output=True,
         text=True,
+        errors="replace",
         timeout=timeout,
         check=False,
         stdin=subprocess.DEVNULL,
@@ -216,14 +221,6 @@ def needs_processing(session_dir: Path) -> bool:
 
 
 # ---- transcription ------------------------------------------------------------------------------
-
-
-def _silent(file_doc: dict[str, Any]) -> bool:
-    qc = file_doc.get("qc") or {}
-    rms, ratio = qc.get("rms_dbfs"), qc.get("silent_ratio")
-    return (isinstance(rms, (int, float)) and rms <= SILENT_RMS_DBFS) or (
-        isinstance(ratio, (int, float)) and ratio >= SILENT_RATIO
-    )
 
 
 def _whisper_argv(
@@ -360,8 +357,8 @@ def transcribe_track(
     if regions is None:
         log.warning("transcript: speech detection failed for segment %d (%s)", segment, speaker)
         return TrackResult(segment, speaker, "failed")
-    if not regions:
-        return TrackResult(segment, speaker, "ok", language)
+    if not regions:  # no speech at all (e.g. a digitally silent track): nothing to send
+        return TrackResult(segment, speaker, "silent", language)
     chunk_dir = workdir / f"seg{segment:02d}_{speaker}"
     chunk_dir.mkdir(mode=0o700, exist_ok=True)
     chunks_: list[tuple[Path, float]] = []
@@ -476,7 +473,8 @@ SYSTEM_PROMPT = {
         "als ISO-Datum JJJJ-MM-TT, auch bei relativen Angaben wie 'morgen', 'Freitag' oder "
         "'Ende Januar', gerechnet ab dem Gesprächsdatum; wörtlich, wenn kein Datum bestimmbar "
         "ist; null, wenn keine Frist genannt wurde. "
-        "'evidence': ein wörtliches Zitat aus dem Transkript, das den Punkt belegt."
+        "'evidence': ein wörtliches Zitat aus dem Transkript (mindestens drei Wörter, ohne "
+        "Zeitmarke und Sprecher), das den Punkt belegt."
     ),
     "en": (
         "You summarise a conversation transcript factually in English. Speakers: 'Me' is the "
@@ -538,16 +536,35 @@ def _norm(text: str) -> str:
     return " ".join(re.findall(r"\w+", text))
 
 
-def supported(evidence: str, corpus_norm: str, corpus_words: set[str]) -> bool:
-    """The quote appears in the transcript (verbatim after normalisation, or ≥ 80 % of its
-    words in the transcript for a short paraphrase of a long sentence)."""
-    quote = _norm(evidence)
-    if len(quote) < 3:
+_PREFIX_RE = re.compile(r"^\s*\[\d{1,2}:\d{2}(?::\d{2})?\]\s*[^:]{1,20}:\s*")
+MIN_QUOTE_WORDS = 3
+
+
+def evidence_windows(utterances: list[Utterance]) -> list[list[str]]:
+    """Word lists of every utterance and of every two neighbouring ones (a quote may run
+    across a turn boundary)."""
+    words = [_norm(u.text).split() for u in utterances]
+    return words + [a + b for a, b in pairwise(words)]
+
+
+def supported(evidence: str, windows: list[list[str]]) -> bool:
+    """The quote is in the transcript: its words in order inside one utterance or two
+    neighbouring ones, verbatim or at least 80 % of them (minor wording differences). A
+    copied prompt prefix ("[00:01:02] Ich: ") is ignored. Shorter than 3 words: rejected."""
+    quote = _norm(_PREFIX_RE.sub("", evidence)).split()
+    if len(quote) < MIN_QUOTE_WORDS:
         return False
-    if quote in corpus_norm:
-        return True
-    words = quote.split()
-    return len(words) >= 4 and sum(w in corpus_words for w in words) / len(words) >= 0.8
+    needle = f" {' '.join(quote)} "
+    for words in windows:
+        if needle in f" {' '.join(words)} ":
+            return True
+    for words in windows:
+        if len(words) < len(quote) * 0.8:
+            continue
+        blocks = SequenceMatcher(None, quote, words, autojunk=False).get_matching_blocks()
+        if sum(b.size for b in blocks) >= 0.8 * len(quote):
+            return True
+    return False
 
 
 def _run_llama(
@@ -605,50 +622,67 @@ def _run_llama(
     return doc
 
 
-URGENCY_CUES = re.compile(
-    r"\b(dringend\w*|eilig\w*|sofort|umgehend|schnellstmöglich|asap|wichtig\w*|priorität\w*|"
-    r"zeitkritisch\w*|keine eile|nicht eilig|hat zeit|urgent\w*|immediately|priority|"
-    r"important|no rush|whenever)\b",
+HIGH_URGENCY = re.compile(
+    r"\b(dringend\w*|eilig\w*|sofort|umgehend|schnellstmöglich|asap|zeitkritisch\w*|"
+    r"priorität\w*|urgent\w*|immediately|priority)\b",
+    re.IGNORECASE,
+)
+LOW_URGENCY = re.compile(
+    r"\b(keine eile|nicht (so )?(dringend|eilig)|hat zeit|kein stress|no rush|not urgent|"
+    r"whenever|no hurry)\b",
     re.IGNORECASE,
 )
 
 
-def urgency_said(evidence: str, utterances: list[Utterance]) -> bool:
-    """An urgency counts only if the passage around the quote names one (no guessing)."""
+def urgency_as_said(urgency: str | None, evidence: str, utterances: list[Utterance]) -> str | None:
+    """Keep the model's urgency only if the passage around the quote says so: high/medium need
+    an urgency word and no denial of it, low needs a denial ("keine Eile"). Otherwise None."""
+    if urgency is None:
+        return None
     quote = set(_norm(evidence).split())
     if not quote or not utterances:
-        return False
+        return None
     scores = [len(quote & set(_norm(u.text).split())) for u in utterances]
     best = max(range(len(utterances)), key=scores.__getitem__)
-    window = utterances[max(0, best - 1) : best + 2]
-    return any(URGENCY_CUES.search(u.text) for u in window)
+    text = " ".join(u.text for u in utterances[max(0, best - 1) : best + 2])
+    low = bool(LOW_URGENCY.search(text))
+    if urgency == "niedrig":
+        return urgency if low else None
+    return urgency if HIGH_URGENCY.search(text) and not low else None
 
 
 def _clean_items(
-    doc: dict[str, Any], corpus_norm: str, corpus_words: set[str]
+    doc: dict[str, Any], windows: list[list[str]]
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], int]:
     agreements: list[dict[str, Any]] = []
     todos: list[dict[str, Any]] = []
     dropped = 0
-    for item in doc.get("agreements") or []:
-        text, ev = str(item.get("text", "")).strip(), str(item.get("evidence", "")).strip()
-        if text and supported(ev, corpus_norm, corpus_words):
+    raw_agreements = doc.get("agreements")
+    raw_todos = doc.get("todos")
+    for item in raw_agreements if isinstance(raw_agreements, list) else []:
+        if not isinstance(item, dict):
+            dropped += 1
+            continue
+        text, ev = str(item.get("text") or "").strip(), str(item.get("evidence") or "").strip()
+        if text and supported(ev, windows):
             agreements.append({"text": text, "evidence": ev})
         else:
             dropped += 1
-    for item in doc.get("todos") or []:
-        task, ev = str(item.get("task", "")).strip(), str(item.get("evidence", "")).strip()
-        if not task or not supported(ev, corpus_norm, corpus_words):
+    for item in raw_todos if isinstance(raw_todos, list) else []:
+        if not isinstance(item, dict):
             dropped += 1
             continue
-        urgency = item.get("urgency")
-        owner, deadline = item.get("owner"), item.get("deadline")
+        task, ev = str(item.get("task") or "").strip(), str(item.get("evidence") or "").strip()
+        if not task or not supported(ev, windows):
+            dropped += 1
+            continue
+        urgency, owner, deadline = item.get("urgency"), item.get("owner"), item.get("deadline")
         todos.append(
             {
                 "task": task,
-                "owner": str(owner).strip() or None if owner else None,
+                "owner": (str(owner).strip() or None) if owner else None,
                 "urgency": urgency if urgency in URGENCIES else None,
-                "deadline": str(deadline).strip() or None if deadline else None,
+                "deadline": (str(deadline).strip() or None) if deadline else None,
                 "evidence": ev,
             }
         )
@@ -672,6 +706,9 @@ WEEKDAYS = {
 }
 
 
+RECENT_PAST_DAYS = 60  # "Ende Januar" said in November means next January; "20.11." on 24.11 not
+
+
 def fix_deadline(value: str | None, call_day: date | None) -> str | None:
     """An ISO date before the call has a wrong year (the model's own idea of "now"): move it
     to the next such day on or after the call. Any other text is kept as said."""
@@ -683,6 +720,8 @@ def fix_deadline(value: str | None, call_day: date | None) -> str | None:
         return value
     if day >= call_day:
         return value
+    if day.year == call_day.year and (call_day - day).days <= RECENT_PAST_DAYS:
+        return value  # a recent date of the call's year (e.g. an overdue item), kept as said
     for year in (call_day.year, call_day.year + 1):
         try:
             moved = day.replace(year=year)
@@ -704,9 +743,7 @@ def summarize(
     """Summary, agreements and to-dos; long calls are summarised in parts, then merged."""
     lang = _lang(language)
     lines = transcript_lines(utterances, lang)
-    corpus = "\n".join(u.text for u in utterances)
-    corpus_norm = _norm(corpus)
-    corpus_words = set(corpus_norm.split())
+    windows = evidence_windows(utterances)
     budget = int(
         (tc.summary.context_tokens - tc.summary.max_output_tokens - PROMPT_RESERVE_TOKENS)
         * CHARS_PER_TOKEN
@@ -730,15 +767,14 @@ def summarize(
             runner,
             f"part{i}",
         )
-        a, t, d = _clean_items(doc, corpus_norm, corpus_words)
+        a, t, d = _clean_items(doc, windows)
         for todo in t:
             todo["deadline"] = fix_deadline(todo["deadline"], call_day)
-            if todo["urgency"] is not None and not urgency_said(todo["evidence"], utterances):
-                todo["urgency"] = None  # not said in the call: left empty
+            todo["urgency"] = urgency_as_said(todo["urgency"], todo["evidence"], utterances)
         agreements += a
         todos += t
         dropped += d
-        summaries.append(str(doc.get("summary", "")).strip())
+        summaries.append(str(doc.get("summary") or "").strip())
     summary = summaries[0] if len(summaries) == 1 else ""
     if len(summaries) > 1:
         merged = _run_llama(
@@ -750,7 +786,7 @@ def summarize(
             runner,
             "reduce",
         )
-        summary = str(merged.get("summary", "")).strip()
+        summary = str(merged.get("summary") or "").strip()
     return {
         "language": lang,
         "text": summary,
@@ -778,7 +814,8 @@ def _segment_offsets(doc: dict[str, Any]) -> dict[int, float]:
         seg_start = _ts(seg.get("started_at"))
         idx = seg.get("index")
         if isinstance(idx, int):
-            out[idx] = (seg_start - start).total_seconds() if start and seg_start else 0.0
+            delta = (seg_start - start).total_seconds() if start and seg_start else 0.0
+            out[idx] = max(0.0, delta)
     return out
 
 
@@ -860,21 +897,30 @@ def _render_md(result: dict[str, Any]) -> str:
 
 
 def _write(processed: Path, result: dict[str, Any]) -> None:
+    """``transcript.json`` is placed last: a crash before that leaves no result (the session
+    is redone), never a "complete" result without its Markdown or checksums."""
     processed.mkdir(mode=0o700, exist_ok=True)
+    final = processed / TRANSCRIPT_JSON
     for name in (TRANSCRIPT_JSON, TRANSCRIPT_MD, integrity.SUMS_NAME):
         target = processed / name
-        if target.exists():
+        if target.exists() and not target.is_symlink():
             os.chmod(target, 0o600)  # a re-run replaces the earlier result
-    integrity._atomic_write_text(
-        processed / TRANSCRIPT_JSON, json.dumps(result, ensure_ascii=False, indent=1) + "\n"
-    )
+    final.unlink(missing_ok=True)
     integrity._atomic_write_text(processed / TRANSCRIPT_MD, _render_md(result))
-    integrity.write_sha256sums(processed, [TRANSCRIPT_JSON, TRANSCRIPT_MD])
+    staged = processed / f".{TRANSCRIPT_JSON}.staged"
+    staged.unlink(missing_ok=True)
+    integrity._atomic_write_text(staged, json.dumps(result, ensure_ascii=False, indent=1) + "\n")
+    integrity.write_sha256sums(
+        processed,
+        [TRANSCRIPT_JSON, TRANSCRIPT_MD],
+        digests={TRANSCRIPT_JSON: integrity.sha256_file(staged)},
+    )
+    os.replace(staged, final)
     for name in (TRANSCRIPT_JSON, TRANSCRIPT_MD, integrity.SUMS_NAME):
         integrity.make_read_only(processed / name)
 
 
-def process_session(
+def _process(
     session_dir: Path,
     cfg: Config,
     *,
@@ -917,22 +963,29 @@ def process_session(
                 if f is None or not path.is_file():
                     tracks.append(TrackResult(idx, speaker, "missing"))
                     continue
-                if _silent(f):
-                    tracks.append(TrackResult(idx, speaker, "silent"))
-                    continue
                 should_pause()
                 duration = f.get("duration_s")
-                track = transcribe_track(
-                    tc,
-                    path,
-                    idx,
-                    speaker,
-                    offsets.get(idx, 0.0),
-                    work,
-                    runner,
-                    language_hint,
-                    float(duration) if isinstance(duration, (int, float)) else None,
-                )
+                try:
+                    track = transcribe_track(
+                        tc,
+                        path,
+                        idx,
+                        speaker,
+                        offsets.get(idx, 0.0),
+                        work,
+                        runner,
+                        language_hint,
+                        float(duration) if isinstance(duration, (int, float)) else None,
+                    )
+                except Exception as exc:  # timeout, missing program, broken output
+                    log.warning(
+                        "transcript: %s segment %d (%s) failed: %s",
+                        sid,
+                        idx,
+                        speaker,
+                        type(exc).__name__,
+                    )
+                    track = TrackResult(idx, speaker, "failed")
                 tracks.append(track)
             if language_hint is None:
                 found = [t.language for t in tracks if t.language and t.speaker == "local"]
@@ -942,7 +995,9 @@ def process_session(
         languages = [t.language for t in tracks if t.language]
         language = max(set(languages), key=languages.count) if languages else None
         transcribed = [t for t in tracks if t.status in ("ok", "partial")]
-        failed = [t for t in tracks if t.status in ("failed", "partial")]
+        # A missing track is speech that was never transcribed: never "complete", so the media
+        # of such a session is never deleted (review 2026-11-24).
+        failed = [t for t in tracks if t.status in ("failed", "partial", "missing")]
         summary: dict[str, Any] | None = None
         summary_error: str | None = None
         if tc.summary.enabled and utterances:
@@ -951,7 +1006,7 @@ def process_session(
                 started = _ts(doc.get("started_at"))
                 call_day = started.date() if started else None
                 summary = summarize(tc, utterances, language, work, runner, call_day)
-            except (TranscriptionError, subprocess.TimeoutExpired, OSError) as exc:
+            except Exception as exc:  # the transcript stays; the session is partial
                 summary_error = (
                     type(exc).__name__ if not isinstance(exc, TranscriptionError) else str(exc)
                 )
@@ -1012,6 +1067,52 @@ def process_session(
         len(transcribed),
     )
     return ProcessResult(sid, status, summary_error)
+
+
+def process_session(
+    session_dir: Path,
+    cfg: Config,
+    *,
+    runner: Runner = _default_runner,
+    now: Callable[[], datetime] = lambda: datetime.now().astimezone(),
+    should_pause: Callable[[], None] = lambda: None,
+) -> ProcessResult:
+    """Transcribe and summarise one finalised session into ``processed/``.
+
+    ``should_pause`` is called before every heavy step; the agent blocks there while a call is
+    being recorded (a stop request raises a BaseException through it). Never raises for a
+    failing tool or a bug: an unexpected error is written as ``status: failed`` (type only), so
+    the session is not retried at every start; ``captation transcribe --force`` redoes it.
+    """
+    try:
+        return _process(session_dir, cfg, runner=runner, now=now, should_pause=should_pause)
+    except Exception as exc:
+        sid = session_dir.name
+        log.error("transcript: %s failed unexpectedly: %s", sid, type(exc).__name__)
+        try:
+            doc = load_session(session_dir)
+            _write(
+                session_dir / PROCESSED_DIR,
+                {
+                    "schema_version": SCHEMA_VERSION,
+                    "generated_at": now().isoformat(timespec="seconds"),
+                    "status": "failed",
+                    "session": session_metadata(doc),
+                    "transcription": {
+                        "engine": "whisper.cpp",
+                        "model": whisper_model(cfg.transcription).name,
+                        "vad": vad_model(cfg.transcription) is not None,
+                        "language": None,
+                        "tracks": [],
+                    },
+                    "transcript": [],
+                    "summary": None,
+                    "summary_error": f"unexpected error: {type(exc).__name__}",
+                },
+            )
+        except Exception:
+            log.error("transcript: %s: the failure could not be recorded", sid)
+        return ProcessResult(sid, "failed", type(exc).__name__)
 
 
 def processed_ok(session_dir: Path) -> bool:
