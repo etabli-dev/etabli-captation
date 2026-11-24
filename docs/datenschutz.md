@@ -18,6 +18,7 @@ ausgewertet.
 | Ton des Gesprächs | im Studienmodus, wenn eine Anruf-App das Mikrofon nutzt | Mehrspur: Mix, Gegenseite (nur die Anruf-App), eigenes Mikrofon, optional externes Gerät |
 | Bild | nur bei Videokonferenzen bzw. eingeschalteter Kamera | Bildschirmaufnahme. Unter Linux/Wayland wird der einmalig freigegebene Bildschirm aufgenommen, nicht nur das Konferenzfenster (Hinweis in den Metadaten) |
 | Metadaten (`session.json`) | je Sitzung | Sitzungs-ID, Projekt-ID, Einwilligungs-Referenz, App-Kennung (z. B. `zoom`), Zeiten, Spuren, Prüfsummen, technische Warnungen |
+| Transkript und Zusammenfassung (`processed/`) | nach jeder Sitzung, lokal (ADR-023) | `transcript.json` (maschinenlesbar: Metadaten, Transkript mit Zeitmarken und Sprecherrolle Ich/Gegenseite, Zusammenfassung, Vereinbarungen, Aufgaben mit Verantwortlichen, Dringlichkeit und Fristen – nur sofern im Gespräch genannt) und `transcript.md`; erzeugt mit whisper.cpp und einem lokalen Sprachmodell, ohne Netzwerk |
 | Importierte Aufnahmen | nur nach `captation import` | Audiodatei eines mobilen Aufnahmegeräts, unverändert (ohne Datei-Tags) |
 | Bestätigung des Haftungsausschlusses | einmal je Benutzer und Textfassung (`captation accept`) | lokal im Statusverzeichnis: Textfassung, Prüfsumme, Zeitpunkt, Benutzername des Betriebssystems, Art der Bestätigung, Programmversion |
 
@@ -40,6 +41,12 @@ Einwilligungserklärungen (nur deren Referenz).
 
 Standard: **keine automatische Löschung**. Optional `storage.retention_days`: dann werden ganze
 Sitzungen nach N Tagen gelöscht (protokolliert; laufende Aufnahmen nie).
+
+Auf dem Mac des Eigentümers gilt `storage.media_retention_days: 90` (ADR-023): **Ton und Bild**
+einer Sitzung werden 90 Tage nach ihrem Ende gelöscht, **aber nur, wenn ihr Transkript
+vollständig ist**. Erhalten bleiben `session.json`, die Prüfsummen und `processed/`
+(Transkript, Zusammenfassung und `media_deleted.json` mit den gelöschten Dateien und deren
+Prüfsummen). Ein unvollständiges oder fehlgeschlagenes Transkript verhindert die Löschung.
 
 ## 5. Technische und organisatorische Maßnahmen
 

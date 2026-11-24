@@ -104,6 +104,74 @@ def open_app() -> None:
     run(None)
 
 
+models_app = typer.Typer(help="Local models for transcripts and summaries.", no_args_is_help=True)
+app.add_typer(models_app, name="models")
+
+
+@models_app.command("download")
+def models_download() -> None:
+    """Download Whisper, the VAD model and the summary model (pinned SHA-256)."""
+    from captation import model_download
+    from captation import transcribe as tr
+
+    try:
+        model_download.download_models(progress=typer.echo)
+    except (tr.TranscriptionError, OSError) as exc:
+        fail(str(exc))
+    typer.echo(f"models in {tr.models_dir()}")
+
+
+@app.command()
+def transcribe(
+    session_id: Annotated[str | None, typer.Argument(help="Session ID (S-…)")] = None,
+    all_sessions: Annotated[
+        bool, typer.Option("--all", help="Every finished session without a transcript")
+    ] = False,
+    force: Annotated[bool, typer.Option("--force", help="Redo an existing transcript")] = False,
+    config: ConfigOpt = None,
+) -> None:
+    """Write processed/transcript.json and transcript.md for finished sessions (ADR-023)."""
+    from captation import storage
+    from captation import transcribe as tr
+
+    cfg = _load(config)
+    if (session_id is None) == (not all_sessions):
+        fail("give a session ID or --all")
+    missing = tr.missing_tools(cfg.transcription)
+    if missing:
+        fail(
+            "missing: " + ", ".join(missing) + " (brew install whisper-cpp llama.cpp; "
+            "captation models download)"
+        )
+    dirs = [
+        d
+        for d in storage.iter_session_dirs(cfg.data_root_path)
+        if (session_id is None or d.name == session_id)
+    ]
+    if session_id is not None and not dirs:
+        fail(f"no session {session_id}")
+    done = 0
+    for d in dirs:
+        processed = d / tr.PROCESSED_DIR
+        if (processed / tr.TRANSCRIPT_JSON).exists():
+            if not force:
+                if session_id is not None:
+                    typer.echo(f"{d.name}: already transcribed (use --force)")
+                continue
+            if (processed / storage.MEDIA_DELETED).exists():
+                typer.echo(f"{d.name}: media already deleted, transcript kept")
+                continue
+        elif not tr.needs_processing(d):
+            if session_id is not None:
+                typer.echo(f"{d.name}: nothing to transcribe")
+            continue
+        result = tr.process_session(d, cfg)
+        typer.echo(f"{d.name}: {result.status}" + (f" ({result.reason})" if result.reason else ""))
+        done += 1
+    if all_sessions:
+        typer.echo(f"{done} session(s) processed")
+
+
 @app.command()
 def arm(
     ref: Annotated[str | None, typer.Option("--ref", help="Consent reference")] = None,

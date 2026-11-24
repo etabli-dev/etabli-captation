@@ -91,9 +91,28 @@ def _sources() -> dict[str, set[str]]:
     return files
 
 
+# ADR-023: the explicit setup command `captation models download` (pinned SHA-256) is the one
+# exception; only cli.py may import it, so the running agent never has network code.
+DOWNLOAD_MODULE = "model_download.py"
+DOWNLOAD_ALLOWED = {"urllib"}
+
+
+def test_the_model_download_is_never_imported_by_the_agent() -> None:
+    importers = {rel for rel, names in _sources().items() if "captation.model_download" in names}
+    assert importers <= {"cli.py"}, sorted(importers)
+    assert {n.split(".")[0] for n in _sources()[DOWNLOAD_MODULE]} & NETWORK_MODULES <= (
+        DOWNLOAD_ALLOWED
+    )
+
+
 def test_no_network_client_libraries_in_src() -> None:
     offenders = {
-        rel: sorted(n for n in names if n.split(".")[0] in NETWORK_MODULES)
+        rel: sorted(
+            n
+            for n in names
+            if n.split(".")[0] in NETWORK_MODULES
+            and not (rel == DOWNLOAD_MODULE and n.split(".")[0] in DOWNLOAD_ALLOWED)
+        )
         for rel, names in _sources().items()
     }
     assert {rel: mods for rel, mods in offenders.items() if mods} == {}

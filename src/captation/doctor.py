@@ -331,6 +331,22 @@ def run_checks(cfg: Config, *, ui_probe: bool = True) -> list[Check]:
             )
         )
 
+    # transcript and summary (ADR-023)
+    if cfg.transcription.enabled:
+        from captation import transcribe as tr
+
+        missing = tr.missing_tools(cfg.transcription)
+        add(
+            Check(
+                "transcription",
+                "warn" if missing else "ok",
+                ("missing: " + ", ".join(missing))
+                if missing
+                else "whisper.cpp and llama.cpp ready",
+                "brew install whisper-cpp llama.cpp && captation models download",
+            )
+        )
+
     # local input
     if cfg.recording.audio.local_input == "follow_call":
         add(Check("local_input", "ok", "follows the microphone the call app uses"))

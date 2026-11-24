@@ -35,15 +35,26 @@
 4. `captation import <datei> --device <gerät> --consent-ref P-018`.
 5. Die Originaldatei auf dem Gerät nach erfolgreichem Import gemäß Studienprotokoll löschen.
 
+## Transkript, Zusammenfassung, Löschfristen (ADR-023)
+
+Nach jeder Sitzung erstellt Captation **lokal** ein Transkript (Sprecher: Ich/Gegenseite) und
+eine Zusammenfassung mit Vereinbarungen und Aufgaben (Verantwortliche, Dringlichkeit, Fristen –
+nur sofern im Gespräch genannt). Ton und Bild werden 90 Tage nach dem Gespräch gelöscht, wenn
+das Transkript vollständig ist; Transkript und Metadaten bleiben. Die Einwilligungserklärung
+muss diese Verarbeitung abdecken: Transkription, automatische Zusammenfassung mit einem lokal
+laufenden Sprachmodell (keine Cloud), Aufbewahrung des Transkripts und Löschung der Aufnahme
+nach 90 Tagen. Zusammenfassungen können Fehler enthalten; jeder Punkt verweist auf ein
+wörtliches Zitat im Transkript.
+
 ## Ansagetext (Vorlage)
 
-> „Bevor wir beginnen: Dieses Gespräch wird für die Studie *[Titel]* aufgezeichnet, wie in der
-> Einwilligungserklärung beschrieben. Die Aufnahme läuft jetzt. Sind alle Anwesenden damit
+> „Bevor wir beginnen: Dieses Gespräch wird für die Studie *[Titel]* aufgezeichnet und lokal
+> transkribiert, wie in der Einwilligungserklärung beschrieben. Die Aufnahme läuft jetzt. Sind alle Anwesenden damit
 > einverstanden? Bitte bestätigen Sie das kurz mündlich. Sie können die Aufnahme jederzeit
 > beenden lassen.“
 
 Englische Fassung:
 
-> "Before we start: this conversation is being recorded for the study *[title]*, as described in
-> the consent form. The recording is running now. Does everyone agree? Please confirm briefly.
+> "Before we start: this conversation is being recorded for the study *[title]* and transcribed
+> locally, as described in the consent form. The recording is running now. Does everyone agree? Please confirm briefly.
 > You can ask to stop the recording at any time."

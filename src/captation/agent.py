@@ -19,7 +19,7 @@ from collections.abc import Callable
 from concurrent.futures import Future
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any, Protocol
+from typing import TYPE_CHECKING, Any, Protocol
 
 from captation import postprocess, session, storage, terms
 from captation.config import Config
@@ -64,6 +64,9 @@ from captation.session import (
     WriteSessionJson,
 )
 from captation.ui.notify import ConsentUi
+
+if TYPE_CHECKING:
+    from captation.transcribe_worker import TranscriptionWorker
 
 log = logging.getLogger(__name__)
 
@@ -197,6 +200,7 @@ class Agent:
         self._tray_seen = True
         self._loop_thread: threading.Thread | None = None
         self._poll_thread: threading.Thread | None = None
+        self.transcriber: TranscriptionWorker | None = None
 
     # ---- event plumbing --------------------------------------------------------------------
 
@@ -694,6 +698,8 @@ class Agent:
                     "app.title", "notify.qc_warning", warnings=", ".join(result.qc_warnings)
                 )
             log.info("session %s finalised: %s", session_id, status)
+            if self.transcriber is not None and status in ("complete", "interrupted"):
+                self.transcriber.submit(record.directory)  # transcript + summary (ADR-023)
         except Exception:
             log.exception("session %s could not be finalised", session_id)
             self.d.ui.notice("app.title", "notify.session_failed")
@@ -831,7 +837,17 @@ class Agent:
             threading.Thread(target=self._prewarm, daemon=True).start()
         self._poll_thread = threading.Thread(target=self._poll, name="captation-poll", daemon=True)
         self._poll_thread.start()
+        if self.cfg.transcription.enabled:
+            from captation.transcribe_worker import TranscriptionWorker
+
+            self.transcriber = TranscriptionWorker(self.cfg, self._recording_busy)
+            self.transcriber.start()
         log.info("agent started (disarmed)")
+
+    def _recording_busy(self) -> bool:
+        """A call is being recorded or finalised: transcripts wait (ADR-023)."""
+        busy = (State.COUNTDOWN, State.RECORDING, State.PENDING_STOP, State.STOPPING, State.ERROR)
+        return self.machine.state in busy or bool(self._records)
 
     def shutdown(self) -> None:
         """Stop and finalise a running session, then stop all threads."""
@@ -845,6 +861,8 @@ class Agent:
             except Exception:
                 log.exception("shutdown: could not finalise the session")
         self._stopping.set()
+        if self.transcriber is not None:
+            self.transcriber.stop()
         try:
             self.submit(_Stop(), timeout_s=30)
         except Exception:

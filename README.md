@@ -157,7 +157,24 @@ und nach einem Absturz von selbst neu. Sichtbar ist nur das Symbol in der Menül
 gelb = Studienmodus, rot = Aufnahme. Wer die App erneut öffnet (Finder, Spotlight, Launchpad),
 bekommt das Menü des Symbols.
 
-### 3. Mobile Aufnahmen importieren
+### 3. Transkript und Zusammenfassung
+
+Nach jedem Gespräch schreibt Captation **lokal** (ohne Internet) in den Ordner `processed/` der
+Sitzung: `transcript.json` (maschinenlesbar, Schema `specs/transcript.schema.json`) und
+`transcript.md` mit Metadaten, Zusammenfassung, Vereinbarungen, Aufgaben (Verantwortliche,
+Dringlichkeit, Frist – nur sofern besprochen) und dem Transkript mit Zeitmarken (Ich/Gegenseite).
+Während einer Aufnahme wartet die Verarbeitung. Einrichtung einmalig:
+
+```
+brew install whisper-cpp llama.cpp
+captation models download        # Whisper, VAD, Qwen2.5-7B (Prüfsummen fest hinterlegt)
+captation transcribe --all        # ältere Sitzungen nachträglich
+```
+
+Ton und Bild werden 90 Tage nach dem Gespräch gelöscht, aber nur bei vollständigem Transkript
+(`storage.media_retention_days`, ADR-023); Transkript und Metadaten bleiben.
+
+### 4. Mobile Aufnahmen importieren
 
 ```
 captation import <datei-oder-ordner> --device plaud_note_pro --consent-ref P-018 [--dry-run]
@@ -165,7 +182,7 @@ captation import <datei-oder-ordner> --device plaud_note_pro --consent-ref P-018
 Geräte: `plaud_note_pro`, `viaim_recdot`, `recordergear_pr200`, `magmo_pro`, `generic`.
 Dateinamen und Datei-Tags (oft Telefonnummern) werden nicht übernommen.
 
-### 4. Dateien finden
+### 5. Dateien finden
 
 `<data_root>/<Projekt-ID oder unassigned>/S-JJJJMMTT-HHMMSS-xxxx/`
 
@@ -177,7 +194,7 @@ Dateinamen und Datei-Tags (oft Telefonnummern) werden nicht übernommen.
 | `segNN_audio.mka`, `segNN_container.mkv` | alle Tonspuren zusammen; OBS-Original |
 | `SHA256SUMS` | Prüfsummen (`sha256sum -c SHA256SUMS`) |
 
-### 5. Probleme
+### 6. Probleme
 
 `captation doctor` nennt zu jedem Problem die Lösung. Bekannte Grenzen:
 `docs/known-limitations.md`. Datenschutz: `docs/datenschutz.md`.

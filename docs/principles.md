@@ -70,7 +70,12 @@ acceptance of `DISCLAIMER.md` (enforced by the acceptance gate, §2.10).**
 5. Logs contain no personal data (no titles, no names, no file contents). Apps are logged by `app.id`.
 6. Video mode prefers **window capture** of the meeting window over display capture. If display
    capture is used, `session.json` gets a warning.
-7. Raw recordings are **never deleted automatically** unless `storage.retention_days` is set.
+7. Raw recordings are **never deleted automatically** unless `storage.retention_days` is set, or
+   (owner decision, ADR-023) `storage.media_retention_days`: then only the audio/video of a
+   session whose transcript is **complete** is deleted after that many days; `session.json`
+   and `processed/` (transcript, summary, list of the deleted files with their hashes) stay.
+8. Transcripts and summaries are made **on this machine only** (local whisper.cpp and
+   llama.cpp with local model files, ADR-023); no transcript text is ever logged.
 
 ## 4. OBS boundary, exposure and licensing
 

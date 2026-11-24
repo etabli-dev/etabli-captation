@@ -27,6 +27,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Literal
 
+from captation import integrity
 from captation.config import Config, ensure_private_dir, schema_errors
 from captation.integrity import sha256_file
 from captation.models import CaptureKind, Category, EncryptionStatus, Mode, OsName
@@ -643,3 +644,74 @@ def _register_recovered_media(session_dir: Path, doc: dict[str, Any]) -> list[st
             )
         names += [str(f["path"]) for f in files if isinstance(f, dict) and f.get("path")]
     return [n for n in names if (session_dir / n).is_file()]
+
+
+MEDIA_DELETED = "media_deleted.json"
+
+
+def apply_media_retention(cfg: Config, now: datetime) -> list[str]:
+    """ADR-023: delete the audio/video of sessions older than ``storage.media_retention_days``
+    whose transcript is complete. ``session.json``, ``SHA256SUMS`` (the hashes stay as
+    evidence of what was recorded) and ``processed/`` are kept; ``processed/media_deleted.json``
+    lists the deleted files with their hashes. Sessions without a complete transcript, still
+    recording, or without a readable ``session.json`` are never touched. Returns the IDs."""
+    from captation import transcribe
+
+    days = cfg.storage.media_retention_days
+    if days is None:
+        return []
+    current = now if now.tzinfo is not None else now.astimezone()
+    cutoff = current - timedelta(days=days)
+    done: list[str] = []
+    for session_dir in iter_session_dirs(cfg.data_root_path):
+        sid = session_dir.name
+        processed = session_dir / transcribe.PROCESSED_DIR
+        if (processed / MEDIA_DELETED).exists() or not transcribe.processed_ok(session_dir):
+            continue
+        try:
+            doc = json.loads((session_dir / SESSION_FILE).read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        if not isinstance(doc, dict) or doc.get("status") == "recording":
+            continue
+        stamp = _parse_ts(doc.get("ended_at")) or _parse_ts(doc.get("started_at"))
+        if stamp is None or stamp >= cutoff:
+            continue
+        keep = {SESSION_FILE, integrity.SUMS_NAME, transcribe.PROCESSED_DIR}
+        hashes = {
+            str(f.get("path")): f.get("sha256")
+            for seg in doc.get("segments") or []
+            for f in seg.get("files") or []
+        }
+        deleted: list[dict[str, object]] = []
+        failed = False
+        for path in sorted(session_dir.iterdir()):
+            if path.name in keep or path.name.startswith("."):
+                continue
+            try:
+                if path.is_dir() and not path.is_symlink():
+                    _remove_tree(path)
+                else:
+                    os.chmod(path, stat.S_IWRITE | stat.S_IREAD)
+                    path.unlink()
+            except OSError as exc:
+                log.error(
+                    "media retention: %s: could not delete a file (%s)", sid, type(exc).__name__
+                )
+                failed = True
+                continue
+            deleted.append({"path": path.name, "sha256": hashes.get(path.name)})
+        if not deleted:
+            continue
+        record = {
+            "deleted_at": current.isoformat(timespec="seconds"),
+            "media_retention_days": days,
+            "complete": not failed,
+            "files": deleted,
+        }
+        integrity._atomic_write_text(processed / MEDIA_DELETED, json.dumps(record, indent=1) + "\n")
+        log.info(
+            "media retention: %s: %d media file(s) deleted after %d days", sid, len(deleted), days
+        )
+        done.append(sid)
+    return done

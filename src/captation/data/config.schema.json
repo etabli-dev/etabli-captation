@@ -466,6 +466,106 @@
           ],
           "minimum": 1,
           "default": null
+        },
+        "media_retention_days": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 1,
+          "default": null,
+          "description": "Delete the audio/video of a session whose transcript is complete after this many days; session.json and processed/ stay (ADR-023). null: never"
+        }
+      }
+    },
+    "transcription": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Local transcript and summary after each session (ADR-023)",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "default": true
+        },
+        "whisper_bin": {
+          "type": "string",
+          "minLength": 1,
+          "default": "whisper-cli"
+        },
+        "model": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "vad": {
+          "type": "boolean",
+          "default": true
+        },
+        "vad_model": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "language": {
+          "type": "string",
+          "pattern": "^(auto|[a-z]{2})$",
+          "default": "auto"
+        },
+        "threads": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 32,
+          "default": 4
+        },
+        "timeout_s": {
+          "type": "integer",
+          "minimum": 60,
+          "maximum": 86400,
+          "default": 7200
+        },
+        "summary": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {
+              "type": "boolean",
+              "default": true
+            },
+            "llama_bin": {
+              "type": "string",
+              "minLength": 1,
+              "default": "llama-completion"
+            },
+            "model": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "default": null
+            },
+            "context_tokens": {
+              "type": "integer",
+              "minimum": 4096,
+              "maximum": 131072,
+              "default": 16384
+            },
+            "max_output_tokens": {
+              "type": "integer",
+              "minimum": 256,
+              "maximum": 8192,
+              "default": 2048
+            },
+            "timeout_s": {
+              "type": "integer",
+              "minimum": 60,
+              "maximum": 86400,
+              "default": 3600
+            }
+          }
         }
       }
     },

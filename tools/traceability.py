@@ -36,6 +36,9 @@ OUTCOMES = ("passed", "failed", "skipped", "not run")
 # Requirements whose evidence lies (partly or wholly) outside the unit suite, with the reason.
 # They are reported separately; ``--strict`` does not demand a passed unit test for them.
 EXTERNAL_EVIDENCE: dict[str, str] = {
+    "R-62": "manual: transcript quality with the real whisper.cpp/llama.cpp models (synthetic "
+    "two-voice call with known agreements and to-dos; the owner's test calls); unit tests use "
+    "fake tools",
     "R-18": "manual: the indicator is visible in the real tray (unit tests cover the schema "
     "and the stub tray only)",
     "R-19": "manual: the start reminder appears on the real desktop (unit tests use a stub "

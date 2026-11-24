@@ -405,3 +405,36 @@ Decided by the owner after the macOS audit, for daily use on the build Mac.
 - **Verify-by:** unit and property tests (both modes, every abort path), agent tests with the
   fake OBS, the owner's test calls.
 
+## ADR-023 — Local transcript, summary and media retention (2026-11-24)
+
+- **Context:** the owner wants every recording to come with its metadata, a transcript and a
+  summary (with agreements and to-dos incl. owner, urgency and deadline, only when discussed) in
+  a machine-readable form, and the audio/video deleted after 90 days once transcription works.
+- **Decision (accepted, owner):**
+  - After finalisation a background worker (one at a time, `nice`, paused while a call is
+    counted down, recorded or finalised) writes `<session>/processed/transcript.json`
+    (`specs/transcript.schema.json`), `transcript.md` and `SHA256SUMS`, read-only.
+  - Speech to text: whisper.cpp `whisper-cli` with Whisper large-v3-turbo (q5_0) and Silero
+    VAD, per track: the user's own track first with language auto-detection, then the other
+    side in that language (a robot voice was misdetected as English, PF-136); tracks that QC
+    measured as silent are not sent (Whisper invents text in silence). Speakers: `local` (the
+    user) and `remote` (the other side), merged in time order with segment offsets.
+  - Summary: llama.cpp `llama-completion` with Qwen2.5-7B-Instruct Q4_K_M, output constrained to
+    a JSON schema, the call date given for relative deadlines; long calls in parts, then merged.
+    Every agreement and to-do must carry a quote found in the transcript, otherwise it is
+    dropped (`dropped_unsupported`); urgency only when an urgency word is said near the quote;
+    an ISO deadline before the call date gets the next matching year. Nothing discussed → empty.
+  - Tools and models are external, local and not bundled (MIT/Apache-2.0); `captation models
+    download` fetches the models with pinned SHA-256. No network at run time; no transcript
+    text in logs. Status `complete` / `partial` (a track or the summary failed) / `failed`.
+  - `storage.media_retention_days: 90`: audio/video is deleted 90 days after the call, only for
+    sessions whose transcript is `complete`; metadata, checksums and `processed/` stay
+    (`media_deleted.json`). Supersedes the "never delete" row of ADR-021. Principles §3.7
+    amended, §3.8 added.
+  - `captation transcribe <ID>|--all [--force]` and `doctor` (`transcription`).
+- **Consequences:** R-62, R-63, PF-136, PF-137, L-34…L-36; the consent form must cover
+  transcription, the local summary and the deletion after 90 days (docs/einwilligung-workflow.md).
+- **Verify-by:** unit tests with fake tools (schema, merge, language, silence, evidence guard,
+  deadlines, urgency, parts, retention, worker pause/stop); a synthetic two-voice call
+  (macOS `say`) with known agreements and to-dos; the owner's four test calls.
+

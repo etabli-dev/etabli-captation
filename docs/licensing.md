@@ -52,3 +52,9 @@ only (`uv sync --group build`).
 
 `ffmpeg`/`ffprobe` and, if `storage.age_recipients` is set, `age` (BSD-3-Clause) are called as
 separate programs and are not bundled.
+
+Transcripts and summaries (ADR-023) use two external programs and three model files, none of
+them bundled: whisper.cpp `whisper-cli` (MIT) and llama.cpp `llama-completion` (MIT), installed
+by the user (`brew install whisper-cpp llama.cpp`); `captation models download` fetches the
+models with pinned SHA-256: Whisper large-v3-turbo in ggml format (MIT, OpenAI weights), the
+Silero VAD model (MIT) and Qwen2.5-7B-Instruct Q4_K_M (Apache-2.0).

@@ -83,6 +83,8 @@ Test levels: **unit** (no OBS, no OS state), **integration** (`obs` marker, real
 
 | ID | Requirement | Source | Test |
 |---|---|---|---|
+| R-62 | After a finished session (complete or interrupted) a local transcript (whisper.cpp; the user's track first, its language used for the other side; silent tracks skipped) and a summary (llama.cpp, JSON-schema constrained) are written to `processed/transcript.json` (`specs/transcript.schema.json`: session metadata, transcript with time and speaker, summary, agreements, to-dos with owner, urgency and deadline) and `transcript.md`, read-only with `SHA256SUMS`. Agreements and to-dos appear only with a supporting quote from the transcript; urgency only if said; otherwise empty. Never during a recording; no network; no transcript text in logs | ADR-023 | unit, manual |
+| R-63 | With `storage.media_retention_days` the audio/video of a session is deleted that many days after it ended, only if its transcript is `complete`; `session.json`, `SHA256SUMS` and `processed/` stay, `processed/media_deleted.json` lists the deleted files and hashes | ADR-023 | unit |
 | R-40 | Each audio role is extracted to `segNN_<role>.flac` (or `.wav`) without resampling, normalisation or filters | §8 | unit (FFT mapping) |
 | R-41 | Video segments are remuxed to `segNN_video.mp4` with all audio tracks. If remuxing fails, the MKV is kept and a warning is recorded | §8 | unit |
 | R-42 | Audio segments recorded with strategy B also produce `segNN_audio.mka` without the dummy video stream | §7, §8 | unit |

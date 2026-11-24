@@ -23,6 +23,12 @@ All notable changes are documented here. The format follows
 - Unit tests and type checks run on macOS and Windows CI as well (Linux-only modules are skipped).
 
 ### Added
+- Local transcript and summary after every session (ADR-023): `processed/transcript.json`
+  (`specs/transcript.schema.json`) and `transcript.md` with metadata, transcript (Ich/Gegenseite),
+  summary, agreements and to-dos (owner, urgency, deadline; only when discussed, each with a
+  quote); whisper.cpp + llama.cpp, no network; `captation transcribe`, `captation models download`.
+- Audio/video deleted 90 days after the call when the transcript is complete
+  (`storage.media_retention_days`, ADR-023).
 - Recording starts when the countdown is shown, not after it (ADR-022, default): *Abbrechen*
   within the countdown stops the recording and deletes it; start debounce 1 s.
 - Study mode without a time limit (ADR-021, now the default): it stays on until it is ended,

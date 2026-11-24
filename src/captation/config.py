@@ -13,7 +13,7 @@ import re
 from functools import cache
 from importlib import resources
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, ClassVar, Literal
 
 import jsonschema
 import yaml
@@ -147,6 +147,37 @@ class StorageConfig(_Strict):
     min_free_gb: float
     age_recipients: list[str] = Field(default_factory=list)
     retention_days: int | None = None
+    # ADR-023: audio/video of a session whose transcript is complete is deleted after this many
+    # days; session.json and processed/ (transcript, summary) stay. None: never.
+    media_retention_days: int | None = None
+
+
+class SummaryConfig(_Strict):
+    enabled: bool = True
+    llama_bin: str = "llama-completion"  # llama.cpp, resolved on PATH (PF-137)
+    model: str | None = None  # default: <app data>/models/<default_model>
+    context_tokens: int = 16384
+    max_output_tokens: int = 2048
+    timeout_s: int = 3600
+
+    default_model: ClassVar[str] = "Qwen2.5-7B-Instruct-Q4_K_M.gguf"
+
+
+class TranscriptionConfig(_Strict):
+    """Local transcript and summary after each session (ADR-023)."""
+
+    enabled: bool = True
+    whisper_bin: str = "whisper-cli"  # whisper.cpp, resolved on PATH (PF-136)
+    model: str | None = None  # default: <app data>/models/<default_model>
+    vad: bool = True
+    vad_model: str | None = None
+    language: str = "auto"
+    threads: int = 4
+    timeout_s: int = 7200
+    summary: SummaryConfig = Field(default_factory=SummaryConfig)
+
+    default_model: ClassVar[str] = "ggml-large-v3-turbo-q5_0.bin"
+    default_vad_model: ClassVar[str] = "ggml-silero-v5.1.2.bin"
 
 
 class HooksConfig(_Strict):
@@ -186,6 +217,7 @@ class Config(_Strict):
     postprocess: PostprocessConfig
     storage: StorageConfig
     hooks: HooksConfig = Field(default_factory=HooksConfig)
+    transcription: TranscriptionConfig = Field(default_factory=TranscriptionConfig)
     ui: UiConfig = Field(default_factory=UiConfig)
     logging: LoggingConfig = Field(default_factory=LoggingConfig)
     qc: QcConfig

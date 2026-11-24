@@ -71,6 +71,7 @@ storage:
   min_free_gb: 10
   age_recipients: []
   retention_days: null
+  media_retention_days: 90       # audio/video deleted 90 days after a complete transcript (ADR-023)
 
 import:
   require_consent_ref: true
@@ -87,3 +88,9 @@ ui:
 logging:
   level: INFO
   dir: null
+
+transcription:                    # local transcript + summary after each session (ADR-023)
+  enabled: true
+  language: auto                  # or de / en
+  summary:
+    enabled: true

@@ -1,0 +1,398 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/etabli-dev/etabli-captation/specs/transcript.schema.json",
+  "title": "Établi Captation processed transcript (processed/transcript.json, ADR-023)",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "generated_at",
+    "status",
+    "session",
+    "transcription",
+    "transcript",
+    "summary",
+    "summary_error"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "generated_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "status": {
+      "enum": [
+        "complete",
+        "partial",
+        "failed"
+      ],
+      "description": "complete: every non-silent track transcribed and (if enabled) summarised; only then is the media eligible for deletion"
+    },
+    "session": {
+      "type": "object",
+      "required": [
+        "session_id",
+        "status",
+        "app",
+        "started_at",
+        "ended_at",
+        "duration_s",
+        "modes",
+        "segments"
+      ],
+      "properties": {
+        "session_id": {
+          "type": "string",
+          "pattern": "^S-[0-9]{8}-[0-9]{6}-[0-9a-z]{4}$"
+        },
+        "project_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "consent_ref": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "status": {
+          "enum": [
+            "complete",
+            "interrupted"
+          ]
+        },
+        "origin": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "app": {
+          "type": "object",
+          "required": [
+            "id",
+            "category"
+          ],
+          "properties": {
+            "id": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "category": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        },
+        "started_at": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "ended_at": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "duration_s": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "modes": {
+          "type": "array",
+          "items": {
+            "enum": [
+              "audio",
+              "video"
+            ]
+          }
+        },
+        "host": {
+          "type": [
+            "object",
+            "null"
+          ]
+        },
+        "warnings": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "segments": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "index",
+              "mode",
+              "files"
+            ],
+            "properties": {
+              "index": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "mode": {
+                "enum": [
+                  "audio",
+                  "video",
+                  null
+                ]
+              },
+              "files": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "required": [
+                    "role",
+                    "path"
+                  ],
+                  "properties": {
+                    "role": {
+                      "type": "string"
+                    },
+                    "path": {
+                      "type": "string"
+                    },
+                    "sha256": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "transcription": {
+      "type": "object",
+      "required": [
+        "engine",
+        "model",
+        "vad",
+        "language",
+        "tracks"
+      ],
+      "properties": {
+        "engine": {
+          "const": "whisper.cpp"
+        },
+        "model": {
+          "type": "string"
+        },
+        "vad": {
+          "type": "boolean"
+        },
+        "language": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "tracks": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "segment",
+              "speaker",
+              "status"
+            ],
+            "properties": {
+              "segment": {
+                "type": "integer"
+              },
+              "speaker": {
+                "enum": [
+                  "local",
+                  "remote"
+                ]
+              },
+              "status": {
+                "enum": [
+                  "ok",
+                  "silent",
+                  "missing",
+                  "failed"
+                ]
+              },
+              "language": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    "transcript": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "start_s",
+          "end_s",
+          "speaker",
+          "text",
+          "segment"
+        ],
+        "properties": {
+          "start_s": {
+            "type": "number",
+            "minimum": 0
+          },
+          "end_s": {
+            "type": "number",
+            "minimum": 0
+          },
+          "speaker": {
+            "enum": [
+              "local",
+              "remote"
+            ],
+            "description": "local = the person who recorded; remote = the other side"
+          },
+          "text": {
+            "type": "string",
+            "minLength": 1
+          },
+          "segment": {
+            "type": "integer",
+            "minimum": 1
+          }
+        }
+      }
+    },
+    "summary": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "required": [
+        "engine",
+        "model",
+        "language",
+        "text",
+        "agreements",
+        "todos"
+      ],
+      "properties": {
+        "engine": {
+          "const": "llama.cpp"
+        },
+        "model": {
+          "type": "string"
+        },
+        "language": {
+          "enum": [
+            "de",
+            "en"
+          ]
+        },
+        "text": {
+          "type": "string"
+        },
+        "agreements": {
+          "type": "array",
+          "description": "only agreements made in the call; empty otherwise",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "text",
+              "evidence"
+            ],
+            "properties": {
+              "text": {
+                "type": "string"
+              },
+              "evidence": {
+                "type": "string",
+                "description": "quote from the transcript"
+              }
+            }
+          }
+        },
+        "todos": {
+          "type": "array",
+          "description": "only tasks named in the call; empty otherwise",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "task",
+              "owner",
+              "urgency",
+              "deadline",
+              "evidence"
+            ],
+            "properties": {
+              "task": {
+                "type": "string"
+              },
+              "owner": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "urgency": {
+                "enum": [
+                  "hoch",
+                  "mittel",
+                  "niedrig",
+                  null
+                ]
+              },
+              "deadline": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "ISO date YYYY-MM-DD where determinable, else as said"
+              },
+              "evidence": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        "parts": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "dropped_unsupported": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "summary_error": {
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  }
+}
