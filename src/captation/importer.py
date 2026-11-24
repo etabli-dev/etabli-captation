@@ -22,7 +22,7 @@ import secrets
 import shutil
 import tempfile
 from collections.abc import Iterator
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Literal, get_args
@@ -30,6 +30,7 @@ from typing import Any, Literal, get_args
 from captation import terms
 from captation.config import Config, ensure_private_dir
 from captation.integrity import CHUNK
+from captation.models import EncryptionStatus
 from captation.postprocess import finalize_session
 from captation.qc import (
     ToolError,
@@ -45,6 +46,8 @@ from captation.storage import (
     Device,
     SessionRecord,
     TimeSource,
+    encryption_verdict,
+    encryption_warning,
     has_free_space,
     host_info,
     new_session_id,
@@ -147,7 +150,15 @@ def _collect(source: Path, recursive: bool) -> list[Path]:
         return [source]
     if source.is_dir():
         walker = source.rglob("*") if recursive else source.iterdir()
-        return sorted(p for p in walker if p.is_file() and not p.name.startswith("."))
+        return sorted(
+            p
+            for p in walker
+            # A deleted recording in .Trashes may have been deleted because consent was
+            # withdrawn; a symlink may lead outside the source (audit 2026-11-24).
+            if not any(part.startswith(".") for part in p.relative_to(source).parts)
+            and not p.is_symlink()
+            and p.is_file()
+        )
     raise ImportRefused("import refused: the source does not exist or is not a file or folder")
 
 
@@ -361,6 +372,14 @@ class _Options:
     app_id: str
     dry_run: bool
     force: bool
+    storage_warning: str | None = None
+
+
+def _encryption_status(path: Path) -> EncryptionStatus:
+    """Disk encryption of the data folder (platform service; tests replace this)."""
+    from captation.platform import get_platform
+
+    return get_platform().disk_encryption().status(path)
 
 
 @dataclass
@@ -380,7 +399,11 @@ def _candidates(cfg: Config, files: list[Path]) -> Iterator[_Candidate | ImportR
         if ext not in allowed:
             yield ImportResult(item=item, status="rejected", reason="extension_not_allowed")
             continue
-        st = path.stat()
+        try:
+            st = path.stat()
+        except OSError:
+            yield ImportResult(item=item, status="failed", reason="unreadable", extension=ext)
+            continue
         if st.st_size > limit:
             yield ImportResult(
                 item=item, status="rejected", reason="too_large", extension=ext, bytes=st.st_size
@@ -423,6 +446,14 @@ def import_recordings(
     opts = _Options(dev, ref, started_at, chosen_app, dry_run, force)
 
     data_root = ensure_private_dir(cfg.data_root_path)
+    status = _encryption_status(data_root)
+    verdict = encryption_verdict(status, cfg.storage.require_disk_encryption)
+    if verdict == "block":
+        raise ImportRefused(
+            "import refused: the data folder is not on an encrypted volume "
+            "(storage.require_disk_encryption: block)"
+        )
+    opts = replace(opts, storage_warning=encryption_warning(status) if verdict == "warn" else None)
     index = ImportIndex(data_root)
     results: list[ImportResult] = []
     for cand in _candidates(cfg, files):
@@ -432,7 +463,15 @@ def import_recordings(
             log.info("import: item %d rejected (%s)", cand.item, cand.reason)
             results.append(cand)
             continue
-        results.append(_import_one(cfg, cand, opts, index, data_root))
+        try:
+            results.append(_import_one(cfg, cand, opts, index, data_root))
+        except OSError as exc:
+            log.error("import: item %d could not be read (%s)", cand.item, type(exc).__name__)
+            results.append(
+                ImportResult(
+                    item=cand.item, status="failed", reason="unreadable", extension=cand.ext
+                )
+            )
     return results
 
 
@@ -481,7 +520,7 @@ def _import_one(
             result.status, result.reason = "rejected", "implausible_duration"
             return result
 
-        warnings: list[str] = []
+        warnings: list[str] = [opts.storage_warning] if opts.storage_warning else []
         time_source: TimeSource
         meta_start = metadata_start(info)
         if meta_start is not None:

@@ -13,6 +13,7 @@ import pytest
 from captation.agent import Agent, AgentDeps, _Query
 from captation.config import Config
 from captation.models import AppRef, ProbeSnapshot
+from captation.obs.client import ObsError
 from captation.obs.controller import ObsController
 from captation.rulesfile import load_rules
 from captation.session import Disarm, State
@@ -84,6 +85,7 @@ class ScriptedProbe:
         self.mic: tuple[AppRef, ...] = ()
         self.camera = False
         self.calls = 0
+        self.closes = 0
 
     def snapshot(self) -> ProbeSnapshot:
         self.calls += 1
@@ -92,7 +94,7 @@ class ScriptedProbe:
         )
 
     def close(self) -> None:
-        return None
+        self.closes += 1
 
 
 class Rig:
@@ -266,7 +268,8 @@ def test_full_recording_flow(rig: Rig) -> None:
     rig.tick(n=6)  # countdown 5 s
     assert rig.state is State.RECORDING and rig.fake_obs.recording
     assert rig.backend.states[-1][0] == "recording" and "AUFNAHME" in rig.backend.states[-1][1]
-    assert rig.backend.sounds == 1 and "Einwilligung" in rig.backend.notes[-1]["body"]
+    # countdown sound (always, §2.8) + start sound
+    assert rig.backend.sounds == 2 and "Einwilligung" in rig.backend.notes[-1]["body"]
     session = rig.sessions()[0]
     assert session["status"] == "recording" and session["consent_ref"] == "P-017"
     rig.probe.mic = ()
@@ -348,7 +351,7 @@ def test_indicator_loss(rig: Rig) -> None:
 
 @pytest.mark.req("R-53")
 def test_obs_crash_and_recovery(rig: Rig, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(rig.agent, "_recover_obs", lambda: None)
+    monkeypatch.setattr(rig.agent, "_recover_obs", lambda *a: None)
     arm(rig)
     _start_call(rig)
     rig.tick(n=6)
@@ -375,3 +378,112 @@ def test_ipc_status_and_unknown_flows(rig: Rig) -> None:
     assert status["ok"] and status["state"] == "DISARMED" and status["tray"] is True
     assert rig.agent.handle_ipc({"type": "arm", "consent_ref": "P-017"})["ok"] is True
     assert rig.agent.handle_ipc({"type": "cancel"})["state"] == "ARMED_IDLE"
+
+
+# ---- audit 2026-11-24: fail closed around the countdown and the reminder ---------------------
+
+
+@pytest.mark.req("R-16", "R-17")
+def test_countdown_that_cannot_be_shown_never_records(
+    rig: Rig, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def broken(app_id: str, seconds: int) -> int:
+        raise RuntimeError("notification centre gone")
+
+    monkeypatch.setattr(rig.ui, "countdown", broken)
+    arm(rig)
+    _start_call(rig)
+    rig.tick(n=30)
+    assert "StartRecord" not in rig.fake_obs.names()
+    assert rig.state is State.DISARMED  # fail closed: a broken countdown also disarms
+    assert all(s["status"] == "cancelled" for s in rig.sessions())
+
+
+@pytest.mark.req("R-16")
+def test_preflight_error_cancels_the_start(rig: Rig) -> None:
+    arm(rig)
+
+    def exposure() -> bool:
+        raise OSError("lsof vanished")
+
+    rig.agent.d.exposure_ok = exposure
+    _start_call(rig)
+    rig.tick(n=30)
+    assert "StartRecord" not in rig.fake_obs.names()
+
+
+@pytest.mark.req("R-59")
+def test_revoked_acceptance_stops_the_next_countdown(rig: Rig) -> None:
+    arm(rig)
+    rig.agent.d.terms_accepted = lambda: False  # `captation accept --revoke` while armed
+    _start_call(rig)
+    rig.tick(n=30)
+    assert "StartRecord" not in rig.fake_obs.names()
+    assert not rig.agent.machine.armed
+
+
+@pytest.mark.req("R-15")
+def test_cancelled_consent_dialog_never_arms(rig: Rig) -> None:
+    rig.backend.ask_answer = None  # Cancel or timeout in the dialog
+    rig.agent.arm_from_tray()
+    rig.flush()
+    assert rig.state is State.DISARMED
+
+
+@pytest.mark.req("R-20")
+def test_reminder_failure_falls_back_to_sound(rig: Rig, monkeypatch: pytest.MonkeyPatch) -> None:
+    def broken() -> None:
+        raise RuntimeError("reminder failed")
+
+    monkeypatch.setattr(rig.ui, "recording_started", broken)
+    arm(rig)
+    _start_call(rig)
+    before = rig.backend.sounds
+    rig.tick(n=7)
+    assert rig.state is State.RECORDING
+    assert rig.backend.sounds > before
+
+
+@pytest.mark.req("R-24")
+def test_session_json_exists_before_any_media(rig: Rig) -> None:
+    arm(rig)
+    _start_call(rig)
+    assert rig.state is State.COUNTDOWN
+    [session] = rig.sessions()
+    assert session["consent_ref"] == "P-017"
+    assert "StartRecord" not in rig.fake_obs.names()
+
+
+@pytest.mark.req("R-53")
+def test_unconfirmed_stop_keeps_the_indicator_until_obs_is_reset(
+    rig: Rig, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    arm(rig)
+    _start_call(rig)
+    rig.tick(n=7)
+    assert rig.state is State.RECORDING
+
+    def failing_stop(timeout_s: float = 20) -> Any:
+        raise ObsError("StopRecord timed out")
+
+    monkeypatch.setattr(rig.obs, "stop_segment", failing_stop)
+    monkeypatch.setattr(rig.agent, "_recover_obs", lambda *a: None)  # recovery tested elsewhere
+    rig.probe.mic = ()
+    rig.tick(n=12)
+    assert rig.state is State.ERROR
+    assert rig.backend.states[-1][0] == "recording"  # the indicator stays on
+
+
+@pytest.mark.req("R-23")
+def test_probe_helper_stops_while_disarmed(rig: Rig) -> None:
+    """Disarmed means nothing is read: the helper (window titles) is stopped (§3.1)."""
+    arm(rig)
+    rig.tick(n=2)
+    calls = rig.probe.calls
+    rig.agent.post(Disarm())
+    rig.flush()
+    rig.tick(n=3)
+    assert rig.probe.closes == 1 and rig.probe.calls == calls
+    arm(rig)
+    rig.tick(n=1)
+    assert rig.probe.calls == calls + 1  # started again with the next armed poll

@@ -283,6 +283,7 @@ def test_window_title_is_returned_only_if_storing_is_enabled() -> None:
         AppRef(pid=7, process_name="OBS", bundle_id="com.obsproject.obs-studio"),
         AppRef(pid=8, process_name="whatever", bundle_id="de.etabli.captation.agent"),
         AppRef(pid=9, process_name="chrome", parent_app="obs"),  # OBS's embedded browser
+        ref(10, "replayd"),  # macOS ScreenCaptureKit daemon while OBS captures audio (PF-131)
     ],
     ids=lambda a: f"{a.process_name}-{a.pid}",
 )

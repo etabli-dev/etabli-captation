@@ -149,8 +149,10 @@ class ConsentUi:
             log.warning("countdown: fallback level %d (notification actions unavailable)", level)
         if level == 3:
             log.warning("countdown: notifications unavailable, tray blink and sound")
-            self.backend.set_blink(True)
-            self.backend.play_sound()
+        # Delivery cannot be verified (the OS may drop or hide a notification it accepted, e.g.
+        # in Focus mode), so every countdown also blinks the tray and plays the sound (§2.8).
+        self.backend.set_blink(True)
+        self.backend.play_sound()
         self._countdown_nid = nid
         self.countdown_level = level
         self.backend.set_menu(self._menu())
@@ -164,18 +166,21 @@ class ConsentUi:
         if self._countdown_nid is not None:
             self.backend.close_notification(self._countdown_nid)
             self._countdown_nid = None
-        if self.countdown_level == 3:
+        if self.countdown_level is not None:
             self.backend.set_blink(False)
         self.countdown_level = None
 
     # ---- notices ---------------------------------------------------------------------------
 
     def recording_started(self) -> None:
-        if self.sound_on_start:
-            self.backend.play_sound()
         text = self.reminder_text or self.t("reminder.default")
-        if self.backend.notify(self.t("reminder.title"), text, critical=True) is None:
-            log.warning("reminder: notification unavailable, tray state shows the recording")
+        shown = "body" in self.backend.notification_capabilities() and (
+            self.backend.notify(self.t("reminder.title"), text, critical=True) is not None
+        )
+        if not shown:
+            log.warning("reminder: notification unavailable, tray state and sound instead")
+        if self.sound_on_start or not shown:
+            self.backend.play_sound()  # `sound_on_start: false` never silences the fallback
 
     def notice(self, title_key: str, body_key: str, **values: object) -> None:
         if self.backend.notify(self.t(title_key), self.t(body_key, **values)) is None:

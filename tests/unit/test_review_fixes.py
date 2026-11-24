@@ -187,3 +187,38 @@ def test_ipc_rejects_deeply_nested_json() -> None:
 
     with pytest.raises((ValueError, RecursionError)):
         ipc.validate_message(json.loads("[" * 50 + "]" * 50))
+
+
+def test_recovered_session_registers_and_seals_the_obs_container(tmp_path: Path) -> None:
+    """Audit 2026-11-24: a container left by a crashed agent is registered with SHA-256, listed
+    in SHA256SUMS and made read-only; an odd session.json never stops the agent."""
+    import stat
+
+    from captation.integrity import verify_sha256sums
+
+    cfg: Config = cfg_with(tmp_path)
+    start = datetime(2026, 11, 23, 10, tzinfo=UTC)
+    rec = storage.SessionRecord.create(
+        cfg,
+        session_id="S-20261123-100000-abce",
+        app_id="zoom",
+        category="meeting",
+        consent_ref="P-1",
+        started_at=start,
+        host=storage.host_info(None, None),
+    )
+    rec.begin_segment(1, "audio", "rule:default", start, "none")
+    rec.write()
+    (rec.directory / "seg01_container.mkv").write_bytes(b"\x1a\x45\xdf\xa3partial")
+    odd = rec.directory.parent / "S-20261123-100001-ffff"
+    odd.mkdir()
+    (odd / "session.json").write_text("[]", encoding="utf-8")
+    assert storage.recover_stale_sessions(cfg, datetime(2026, 11, 23, 11, tzinfo=UTC)) == [
+        rec.session_id
+    ]
+    doc = json.loads((rec.directory / "session.json").read_text())
+    [entry] = doc["segments"][0]["files"]
+    assert entry["role"] == "container" and entry["bytes"] == 11 and len(entry["sha256"]) == 64
+    assert verify_sha256sums(rec.directory)
+    mode = stat.S_IMODE((rec.directory / "seg01_container.mkv").stat().st_mode)
+    assert not mode & stat.S_IWUSR

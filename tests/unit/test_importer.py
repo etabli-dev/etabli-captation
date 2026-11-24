@@ -51,6 +51,12 @@ def restore_logging() -> Iterator[None]:
     logger.propagate = propagate
 
 
+@pytest.fixture(autouse=True)
+def encrypted_data_root(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Imports check the disk-encryption policy; tests run on an "encrypted" data root."""
+    monkeypatch.setattr(importer, "_encryption_status", lambda path: "encrypted")
+
+
 def _cli(tmp_path: Path, *args: str, overrides: dict[str, Any] | None = None) -> Any:
     cfg_file = write_config_file(tmp_path, overrides)
     return CliRunner().invoke(app, ["import", *args, "--config", str(cfg_file)])
@@ -337,3 +343,70 @@ def test_failed_import_leaves_no_session(tmp_path: Path) -> None:
     assert _sessions(tmp_path) == []
     assert not list((tmp_path / "data").glob(".import-staging-*"))
     assert not (tmp_path / "data" / importer.INDEX_NAME).exists()
+
+
+# ---- audit 2026-11-24 ---------------------------------------------------------------------
+
+
+@pytest.mark.req("R-46")
+def test_import_follows_the_disk_encryption_policy(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    src = make_plain_audio(tmp_path / "a.wav", duration=2.0)
+    monkeypatch.setattr(importer, "_encryption_status", lambda path: "unencrypted")
+    cfg = make_config(tmp_path)
+    assert cfg.storage.require_disk_encryption == "block"
+    with pytest.raises(importer.ImportRefused, match="encrypted"):
+        importer.import_recordings(
+            cfg, src, device="generic", consent_ref="P-018", started_at=None, app_id=None
+        )
+    assert _sessions(tmp_path) == []
+    warn = make_config(tmp_path, {"storage.require_disk_encryption": "warn"})
+    [res] = importer.import_recordings(
+        warn, src, device="generic", consent_ref="P-018", started_at=None, app_id=None
+    )
+    assert res.status == "imported"
+    [session] = _sessions(tmp_path)
+    assert any(w.startswith("storage:") for w in _doc(session)["warnings"])
+
+
+@pytest.mark.req("R-49")
+def test_recursive_import_skips_hidden_folders_and_symlinks(tmp_path: Path) -> None:
+    card = tmp_path / "card"
+    (card / ".Trashes" / "501").mkdir(parents=True)
+    make_plain_audio(card / ".Trashes" / "501" / "deleted.wav", duration=2.0)
+    make_plain_audio(card / "keep.wav", duration=2.5)
+    outside = make_plain_audio(tmp_path / "outside.wav", duration=3.0)
+    (card / "link.wav").symlink_to(outside)
+    results = importer.import_recordings(
+        make_config(tmp_path),
+        card,
+        device="generic",
+        consent_ref="P-018",
+        started_at=None,
+        app_id=None,
+        recursive=True,
+    )
+    assert [r.status for r in results] == ["imported"]  # only keep.wav
+
+
+@pytest.mark.req("R-49")
+@pytest.mark.skipif(not POSIX or os.geteuid() == 0, reason="needs POSIX permissions, not root")
+def test_one_unreadable_file_does_not_abort_the_batch(tmp_path: Path) -> None:
+    card = tmp_path / "card"
+    card.mkdir()
+    make_plain_audio(card / "a.wav", duration=2.0)
+    locked = make_plain_audio(card / "b.wav", duration=2.5)
+    locked.chmod(0)
+    try:
+        results = importer.import_recordings(
+            make_config(tmp_path),
+            card,
+            device="generic",
+            consent_ref="P-018",
+            started_at=None,
+            app_id=None,
+        )
+    finally:
+        locked.chmod(0o600)
+    assert sorted(r.status for r in results) == ["failed", "imported"]

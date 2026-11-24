@@ -34,6 +34,12 @@ VIDEO_SCENE = "Video"
 STATE_STARTED = "OBS_WEBSOCKET_OUTPUT_STARTED"
 STATE_STOPPED = "OBS_WEBSOCKET_OUTPUT_STOPPED"
 OUTPUT_NOT_RUNNING = 501  # obs-websocket RequestStatus::OutputNotRunning
+# Outputs of the user's own OBS use: a profile/collection switch would cut them off.
+OTHER_OUTPUTS = (
+    ("GetStreamStatus", "streaming"),  # PF-004
+    ("GetVirtualCamStatus", "virtual camera"),  # PF-004
+    ("GetReplayBufferStatus", "replay buffer"),  # PF-004
+)
 
 
 class Transport(Protocol):
@@ -165,7 +171,8 @@ class ObsController:
                 self._rec.changed.notify_all()
             stopped = data.get("outputState") == STATE_STOPPED
             if stopped and self._recording_expected and not self._stopping:
-                # Disk full, encoder error or the Stop button in OBS: not our stop.
+                # OBS ended the recording itself (disk full, encoder error, Stop in the OBS
+                # window): the indicator must not keep saying "recording" (§2.5).
                 log.warning("obs: recording stopped without a stop request")
                 self._recording_expected = False
                 if self._on_record_stopped is not None:
@@ -209,13 +216,15 @@ class ObsController:
         for name in (self.cfg.obs.profile_audio, self.cfg.obs.profile_video):
             if name not in profiles:
                 raise ObsError(f"profile {name} missing: run `captation obs bootstrap`")
-        try:
-            if not t.request("GetRecordStatus").get("outputActive"):
-                # A crash can leave Captation inputs in the saved collection; they would hold
-                # the microphone while idle (principles §5.2).
-                self._remove_leftovers()
-        except ObsError:
-            log.warning("obs: could not check for leftover Captation inputs")
+        if not self._recording_expected:
+            # A crash can leave Captation inputs in the saved collection; they would hold the
+            # microphone while idle (principles §5.2). Not while a recording is expected: a
+            # reconnect in the middle of a session must not tear down its inputs.
+            try:
+                if not t.request("GetRecordStatus").get("outputActive"):
+                    self._remove_leftovers()
+            except ObsError:
+                log.warning("obs: could not check for leftover Captation inputs")
         return self._info
 
     @property
@@ -319,6 +328,13 @@ class ObsController:
         ``GetRecordStatus`` can lag a moment behind a STOPPED event, so a short grace period
         is waited out. A recording that persists (not ours, or still running) is an error.
         """
+        for request, what in OTHER_OUTPUTS:
+            try:
+                active = self._req(request).get("outputActive")
+            except ObsRequestError:
+                continue  # output type not available in this OBS build
+            if active:
+                raise ObsError(f"OBS {what} is active: Captation does not switch scenes now")
         deadline = time.monotonic() + grace_s
         while self._req("GetRecordStatus").get("outputActive"):
             if self._recording_expected or time.monotonic() > deadline:
@@ -419,6 +435,8 @@ class ObsController:
         if screen_kind is None or (cap.needs_screen_token and screen is None):
             warnings.append("capture:not_approved")
             return "none"
+        if screen is not None and cap.main_display is not None:
+            screen = self._with_main_display(screen, *cap.main_display)
         self._req(
             "CreateInput",
             {
@@ -431,6 +449,21 @@ class ObsController:
         if self.cfg.recording.video.capture == "window_preferred":
             warnings.append("capture:display_fallback")
         return "display"
+
+    def _with_main_display(self, settings: dict[str, Any], kind: str, key: str) -> dict[str, Any]:
+        """Name the main display explicitly: an empty display records black frames (macOS)."""
+        if settings.get(key):
+            return settings
+        try:
+            value = self._req("GetInputDefaultSettings", {"inputKind": kind})[
+                "defaultInputSettings"
+            ].get(key)
+        except ObsError:
+            value = None
+        if not isinstance(value, str) or not value:
+            log.warning("video: main display unknown, display capture may stay black")
+            return settings
+        return {**settings, key: value}
 
     # ---- recording -----------------------------------------------------------------------
 
@@ -460,7 +493,15 @@ class ObsController:
         if flatpak and str(record_dir.resolve()).startswith("/tmp/"):
             raise ObsError("the OBS Flatpak cannot write to /tmp (PF-011): move data_root")
         info = self._info or self.ensure_running()
-        directory = str(record_dir)
+        directory = str(record_dir.resolve())  # OBS resolves relative paths against its own cwd
+        # The track layout, container and split setting decide which file holds which role:
+        # set and verify them for every segment, not only at bootstrap (a changed config or
+        # an edit in the OBS window would map tracks to the wrong role, audit 2026-11-24).
+        from captation.obs.bootstrap import track_bitmask
+
+        self._set_and_verify(kinds.P_REC_TRACKS, str(track_bitmask(self.cfg)))
+        self._set_and_verify(kinds.P_REC_FORMAT, kinds.V_FORMAT_MKV)
+        self._set_and_verify(kinds.P_REC_SPLIT, kinds.V_FALSE)
         if info.set_record_directory:
             self._req("SetRecordDirectory", {"recordDirectory": directory})
             if self._req("GetRecordDirectory").get("recordDirectory") != directory:
@@ -530,8 +571,12 @@ class ObsController:
             if ours and self._req("GetRecordStatus").get("outputActive"):
                 with self._rec.changed:
                     self._rec.state = None
-                self._req("StopRecord")
-                self._wait_state(STATE_STOPPED, 20)
+                self._stopping = True
+                try:
+                    self._req("StopRecord")
+                    self._wait_state(STATE_STOPPED, 20)
+                finally:
+                    self._stopping = False
         except ObsRequestError as exc:
             if exc.code != OUTPUT_NOT_RUNNING:
                 raise

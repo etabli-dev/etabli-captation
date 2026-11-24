@@ -53,8 +53,13 @@ class UiBackend(Protocol):
 
     def ask_text(self, title: str, prompt: str) -> str | None: ...
 
-    def run_main_loop(self, stop: threading.Event) -> None:
-        """Block the main thread until ``stop`` is set (macOS: the Cocoa run loop)."""
+    def run_main_loop(
+        self, stop: threading.Event, on_terminate: Callable[[], None] | None = None
+    ) -> None:
+        """Block the main thread until ``stop`` is set (macOS: the Cocoa run loop).
+
+        ``on_terminate`` runs if the platform ends the process from inside its run loop
+        (macOS: ``NSApp terminate:`` at logout), where the caller's ``finally`` never runs."""
         ...
 
     def stop(self) -> None: ...
@@ -106,7 +111,9 @@ class UnavailableUi:
     def ask_text(self, title: str, prompt: str) -> str | None:
         return None
 
-    def run_main_loop(self, stop: threading.Event) -> None:
+    def run_main_loop(
+        self, stop: threading.Event, on_terminate: Callable[[], None] | None = None
+    ) -> None:
         stop.wait()
 
     def stop(self) -> None:

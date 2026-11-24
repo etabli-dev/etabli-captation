@@ -298,3 +298,20 @@ def test_two_segments_audio_then_video(tmp_path: Path) -> None:
         "seg02_remote.flac",
     }
     assert verify_sha256sums(rec.directory)
+
+
+@pytest.mark.req("R-41")
+def test_qc_runs_on_the_container_when_tracks_are_not_extracted(tmp_path: Path) -> None:
+    """Track QC is mandatory (§5.5): `extract_tracks: false` must not switch it off."""
+    cfg = make_config(tmp_path, {"postprocess.extract_tracks": False, "qc.silence_warn_s": 5})
+    rec = _session(cfg, "audio")
+    # remote (stream 1) falls silent after 1 s of 9 s
+    make_container(
+        rec.directory / "seg01_container.mkv", video="dummy", duration=9.0, silent_after={1: 1.0}
+    )
+    process_segment(rec, 1, "audio", cfg)
+    result = finalize_session(rec, cfg, status="complete")
+    assert "qc:remote_silent" in result.qc_warnings
+    doc = json.loads(rec.session_file.read_text(encoding="utf-8"))
+    assert schema_errors(doc, "session.schema.json") == []
+    assert "qc:remote_silent" in doc["warnings"]

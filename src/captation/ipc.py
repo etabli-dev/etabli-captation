@@ -16,6 +16,7 @@ import os
 import secrets
 import socket
 import sys
+import tempfile
 import threading
 from collections.abc import Callable
 from multiprocessing.connection import Client, Connection, Listener
@@ -77,10 +78,23 @@ def pipe_address(domain: str, user: str) -> str:
     return rf"\\.\pipe\etabli-captation-{digest}"
 
 
+# sockaddr_un.sun_path holds 104 bytes on macOS/BSD and 108 on Linux, including the final NUL.
+SUN_PATH_MAX = 103 if sys.platform == "darwin" else 107
+
+
+def socket_path(preferred: Path, fallback_root: Path, uid: int) -> Path:
+    """``preferred`` if it fits into ``sun_path``, else a private per-user directory below
+    ``fallback_root`` (macOS: the per-user ``/var/folders/…/T``). A long home folder would
+    otherwise make the agent fail with ``AF_UNIX path too long``."""
+    if len(os.fsencode(preferred)) <= SUN_PATH_MAX:
+        return preferred
+    return ensure_private_dir(fallback_root / f"etabli-captation-{uid}") / preferred.name
+
+
 def address() -> str:
-    if os.name == "nt":
+    if sys.platform == "win32":  # mypy narrows sys.platform, not os.name
         return pipe_address(os.environ.get("USERDOMAIN", ""), os.environ.get("USERNAME", "user"))
-    return str(runtime_dir() / "agent.sock")
+    return str(socket_path(runtime_dir() / "agent.sock", Path(tempfile.gettempdir()), os.getuid()))
 
 
 def authkey_path() -> Path:

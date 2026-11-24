@@ -575,7 +575,9 @@ class LinuxUi:
             return None
         return out.stdout.strip() if out.returncode == 0 else None
 
-    def run_main_loop(self, stop: threading.Event) -> None:
+    def run_main_loop(
+        self, stop: threading.Event, on_terminate: Callable[[], None] | None = None
+    ) -> None:
         stop.wait()
 
     def stop(self) -> None:

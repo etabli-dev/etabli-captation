@@ -338,3 +338,65 @@ def test_file_token_store(tmp_path: Path) -> None:
     assert store.load() == "abc"
     if os.name == "posix":  # Windows: ACLs, not mode bits
         assert (tmp_path / "state" / "screencast-token").stat().st_mode & 0o077 == 0
+
+
+# ---- audit 2026-11-24 ---------------------------------------------------------------------
+
+
+@pytest.mark.req("R-53")
+def test_obs_ending_the_recording_itself_is_reported(tmp_path: Path) -> None:
+    lost: list[bool] = []
+    stopped: list[bool] = []
+    ctl, fake = make(
+        tmp_path, on_lost=lambda: lost.append(True), on_record_stopped=lambda: stopped.append(True)
+    )
+    ctl.prepare_segment("audio", AppRef(pid=0, process_name="signal"))
+    ctl.start_segment(tmp_path / "rec", "seg01_container")
+    fake.recording = False  # disk full / stop clicked in the OBS window
+    fake.emit("RecordStateChanged", {"outputState": "OBS_WEBSOCKET_OUTPUT_STOPPED"})
+    assert stopped == [True] and lost == []  # still connected: a stop, not a lost OBS
+    # a stop the agent asked for is not reported
+    ctl2, _ = make(tmp_path, on_record_stopped=lambda: stopped.append(False))
+    ctl2.prepare_segment("audio", AppRef(pid=0, process_name="signal"))
+    ctl2.start_segment(tmp_path / "rec2", "seg01_container")
+    ctl2.stop_segment()
+    assert stopped == [True]
+
+
+@pytest.mark.req("R-11", "R-42")
+def test_every_segment_verifies_the_track_layout_and_container(tmp_path: Path) -> None:
+    ctl, fake = make(tmp_path)
+    ctl.prepare_segment("audio", AppRef(pid=0, process_name="signal"))
+    profile = fake.current_profile
+    fake.params[profile][("AdvOut", "RecTracks")] = "3"  # edited in the OBS window
+    fake.params[profile][("AdvOut", "RecFormat2")] = "hybrid_mov"
+    ctl.start_segment(tmp_path / "rec", "seg01_container")
+    assert fake.params[profile][("AdvOut", "RecTracks")] == "7"
+    assert fake.params[profile][("AdvOut", "RecFormat2")] == "mkv"
+    assert fake.params[profile][("AdvOut", "RecSplitFile")] == "false"
+
+
+@pytest.mark.req("R-36")
+def test_leftover_inputs_are_removed_when_connecting(tmp_path: Path) -> None:
+    fake = FakeObs()
+    fake.inputs["Captation Local"] = {"kind": "pulse_input_capture", "settings": {}}
+    make(tmp_path, fake)
+    assert "Captation Local" not in fake.inputs  # OBS never holds the mic while idle
+
+
+@pytest.mark.req("R-34")
+def test_no_scene_switch_while_the_users_virtual_camera_runs(tmp_path: Path) -> None:
+    ctl, fake = make(tmp_path)
+    fake.virtualcam = True
+    with pytest.raises(ObsError, match="virtual camera"):
+        ctl.prepare_segment("audio", AppRef(pid=0, process_name="signal"))
+    assert fake.current_collection != "Captation" or fake.calls  # nothing switched before
+
+
+@pytest.mark.req("R-24")
+def test_record_directory_is_absolute(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    ctl, fake = make(tmp_path)
+    ctl.prepare_segment("audio", AppRef(pid=0, process_name="signal"))
+    monkeypatch.chdir(tmp_path)
+    ctl.start_segment(Path("rel") / "rec", "seg01_container")
+    assert fake.record_dir == str((tmp_path / "rel" / "rec").resolve())

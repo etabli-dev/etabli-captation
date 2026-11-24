@@ -155,15 +155,28 @@ def run(cfg: Config, config_path: str | None = None) -> None:
 
     signal.signal(signal.SIGTERM, on_signal)
     signal.signal(signal.SIGINT, on_signal)
+    if hasattr(signal, "SIGHUP"):
+        signal.signal(signal.SIGHUP, on_signal)
     agent.start()
     server.start()
     guard = watchdog.start(config_path)  # stops a recording if this process dies
+    cleaned = threading.Lock()
+
+    def cleanup() -> None:
+        """Runs once: from ``finally`` or, on macOS, from AppKit's terminate (logout)."""
+        if not cleaned.acquire(blocking=False):
+            return
+        stop.set()
+        try:
+            server.close()
+            agent.shutdown()
+            if guard is not None:
+                guard.goodbye()
+        finally:
+            lock.close()
+
     try:
         # macOS needs the tray run loop on the main thread; elsewhere this just waits.
-        agent.d.ui.backend.run_main_loop(stop)
+        agent.d.ui.backend.run_main_loop(stop, on_terminate=cleanup)
     finally:
-        server.close()
-        agent.shutdown()
-        if guard is not None:
-            guard.goodbye()
-        lock.close()
+        cleanup()

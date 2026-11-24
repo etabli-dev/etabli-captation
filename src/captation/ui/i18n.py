@@ -46,6 +46,7 @@ STRINGS: dict[str, dict[str, str]] = {
         "refused.consent_ref_required": "Bitte eine Einwilligungs-Referenz angeben.",
         "refused.consent_ref_invalid": "Die Einwilligungs-Referenz hat nicht das erwartete Format.",
         "refused.obs_unavailable": "OBS ist nicht erreichbar.",
+        "refused.shutting_down": "Captation wird gerade beendet.",
         "refused.terms_not_accepted": "Haftungsausschluss und Nutzungsbedingungen sind noch "
         "nicht bestätigt (`captation accept`).",
         "terms.title": "Établi Captation – Haftungsausschluss und Nutzungsbedingungen",
@@ -133,6 +134,7 @@ STRINGS: dict[str, dict[str, str]] = {
         "refused.consent_ref_required": "Please enter a consent reference.",
         "refused.consent_ref_invalid": "The consent reference has an unexpected format.",
         "refused.obs_unavailable": "OBS is not reachable.",
+        "refused.shutting_down": "Captation is shutting down.",
         "refused.terms_not_accepted": "The disclaimer and conditions of use have not been "
         "accepted yet (`captation accept`).",
         "terms.title": "Établi Captation – disclaimer and conditions of use",

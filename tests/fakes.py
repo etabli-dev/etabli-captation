@@ -70,6 +70,8 @@ class FakeObs:
         self.lock = threading.Lock()
         self.emit_stopped = True
         self.lag_active = 0  # number of GetRecordStatus calls that still report active
+        self.main_display_uuid: str | None = "MAIN-DISPLAY-UUID"  # display_capture default (macOS)
+        self.virtualcam = False  # the user's own OBS virtual camera (audit 2026-11-24)
 
     # ---- Transport -------------------------------------------------------------------------
 
@@ -239,6 +241,8 @@ class FakeObs:
         return {"propertyItems": DEVICES}
 
     def _r_GetInputDefaultSettings(self, d: dict[str, Any]) -> dict[str, Any]:
+        if d["inputKind"] == "display_capture" and self.main_display_uuid:
+            return {"defaultInputSettings": {"display_uuid": self.main_display_uuid}}
         return {"defaultInputSettings": {"kind": d["inputKind"]}}
 
     def _r_SetInputAudioTracks(self, d: dict[str, Any]) -> dict[str, Any]:
@@ -255,6 +259,9 @@ class FakeObs:
 
     def _r_GetRecordDirectory(self, d: dict[str, Any]) -> dict[str, Any]:
         return {"recordDirectory": self.record_dir}
+
+    def _r_GetVirtualCamStatus(self, d: dict[str, Any]) -> dict[str, Any]:
+        return {"outputActive": self.virtualcam}
 
     def _r_GetRecordStatus(self, d: dict[str, Any]) -> dict[str, Any]:
         if self.lag_active > 0:

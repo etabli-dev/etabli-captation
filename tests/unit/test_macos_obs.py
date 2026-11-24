@@ -5,6 +5,7 @@ from __future__ import annotations
 import plistlib
 import subprocess
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -104,10 +105,24 @@ def test_video_without_bundle_falls_back_to_display_with_warning(tmp_path: Path)
     ctl, fake = mac_controller(tmp_path)
     prep = ctl.prepare_segment("video", CLI_TOOL)
     assert prep.capture == "display" and "capture:display_fallback" in prep.warnings
-    assert fake.inputs[SCREEN]["settings"] == {"type": 0, "show_cursor": True}
+    # the main display is named explicitly: an empty display_uuid records black frames (PF-130)
+    assert fake.inputs[SCREEN]["settings"] == {
+        "type": 0,
+        "show_cursor": True,
+        "display_uuid": "MAIN-DISPLAY-UUID",
+    }
     ctl.teardown_segment()
     ctl.prepare_segment("video", ZOOM)
+    assert "display_uuid" not in fake.inputs[SCREEN]["settings"]  # app capture needs no display
     ctl.teardown_segment()
+
+
+def test_display_capture_without_known_main_display_keeps_settings(tmp_path: Path) -> None:
+    ctl, fake = mac_controller(tmp_path)
+    fake.main_display_uuid = None
+    prep = ctl.prepare_segment("video", CLI_TOOL)
+    assert prep.capture == "display"
+    assert fake.inputs[SCREEN]["settings"] == {"type": 0, "show_cursor": True}
 
 
 def test_display_capture_config_needs_no_token(tmp_path: Path) -> None:
@@ -128,13 +143,15 @@ def test_pf_rule_and_daemon_text() -> None:
     script = boot_script()
     assert f"/sbin/pfctl -q -a {ANCHOR} -f {RULE_FILE}" in script
     assert "/sbin/pfctl -E" in script and "/sbin/pfctl -X" in script
-    assert "|| /sbin/pfctl -q -f /etc/pf.conf" in script  # stock main ruleset, never edited
+    # the stock main ruleset is loaded only if none is loaded (never replaces another tool's)
+    assert '[ -z "$(/sbin/pfctl -sr 2>/dev/null)" ] && /sbin/pfctl -q -f /etc/pf.conf' in script
+    assert "-s Anchors" not in script
     d = daemon_definition()
     assert d["Label"] == "de.etabli.captation.pf" and d["RunAtLoad"] is True
     assert d["ProgramArguments"][:2] == ["/bin/sh", "-c"]
     # root runs absolute paths only (never a binary from the user's PATH)
     commands = {w.strip('"$(') for w in script.split() if "bin/" in w}
-    assert commands == {"/sbin/pfctl", "/usr/bin/grep", "/usr/bin/sed", "/bin/cat"}
+    assert commands == {"/sbin/pfctl", "/usr/bin/sed", "/bin/cat"}
 
 
 def write_artefacts(tmp_path: Path, port: int) -> tuple[Path, Path]:
@@ -193,21 +210,36 @@ def test_check_needs_artefacts_and_blocked_connections(tmp_path: Path) -> None:
     assert artefacts_ok(4455, rule_file=rule_file, plist=plist)
     assert not artefacts_ok(4456, rule_file=rule_file, plist=plist)
 
-    def check(lsof: str, reachable: set[str], port: int = 4455) -> firewall.FirewallStatus:
+    def check(
+        lsof: str, reachable: set[str], port: int = 4455, runner: Any = None
+    ) -> firewall.FirewallStatus:
         return firewall_macos.check(
             port,
-            runner=fw_runner(lsof),
+            runner=runner or fw_runner(lsof),
             connect=lambda a, p: a in reachable,
             rule_file=rule_file,
             plist=plist,
         )
 
-    ok = check(LSOF_PUBLIC, set())
+    ok = check(LSOF_PUBLIC, {"127.0.0.1"})  # OBS listens (loopback is allowed by the rule)
     assert ok.ok and ok.method == "pf" and "blocked" in ok.details[-1]
-    bad = check(LSOF_PUBLIC, {"192.0.2.23"})
+    bad = check(LSOF_PUBLIC, {"127.0.0.1", "192.0.2.23"})
     assert not bad.ok and "192.0.2.23" in bad.details[-1]
-    skipped = check(LSOF_LOOPBACK, {"192.0.2.23"})
+    skipped = check(LSOF_LOOPBACK, set())  # nothing listens at all
     assert skipped.ok and "skipped" in skipped.details[-1]
+
+    # audit 2026-11-24: a failing tool never counts as "blocked"
+    def broken_ifconfig(argv: list[str]) -> subprocess.CompletedProcess[str]:
+        return subprocess.CompletedProcess(argv, 127, "", "TimeoutExpired")
+
+    unverified = check("", {"127.0.0.1"}, runner=broken_ifconfig)
+    assert not unverified.ok and "not verified" in unverified.details[-1]
+
+    def offline(argv: list[str]) -> subprocess.CompletedProcess[str]:
+        return subprocess.CompletedProcess(argv, 0, IFCONFIG.split("en0:")[0], "")
+
+    alone = check("", {"127.0.0.1"}, runner=offline)
+    assert alone.ok and "no non-loopback address" in alone.details[-1]
     missing = firewall_macos.check(
         4455, runner=fw_runner(LSOF_PUBLIC), rule_file=tmp_path / "x", plist=tmp_path / "y"
     )

@@ -11,6 +11,7 @@ import contextlib
 import logging
 import queue
 import re
+import sys
 import threading
 import time
 from collections.abc import Callable
@@ -107,9 +108,28 @@ class ObsDriver(Protocol):
     def close(self) -> None: ...
 
 
+def _awake_independent_clock() -> Callable[[], float]:
+    """Monotonic seconds that keep counting while the computer sleeps.
+
+    ``time.monotonic()`` stops during sleep on macOS (``mach_absolute_time``) and Linux
+    (``CLOCK_MONOTONIC``), so an agent armed before closing the lid would still be armed hours
+    later (§2.3). macOS: ``CLOCK_MONOTONIC`` (includes sleep); Linux: ``CLOCK_BOOTTIME``;
+    Windows: ``time.monotonic()`` (QueryPerformanceCounter keeps counting in sleep)."""
+    if sys.platform == "darwin":
+        clock_id = time.CLOCK_MONOTONIC
+    elif sys.platform.startswith("linux"):
+        clock_id = time.CLOCK_BOOTTIME
+    else:
+        return time.monotonic
+    return lambda: time.clock_gettime(clock_id)
+
+
 class RealClock:
+    def __init__(self) -> None:
+        self._now = _awake_independent_clock()
+
     def now(self) -> float:
-        return time.monotonic()
+        return self._now()
 
     def wall(self) -> datetime:
         return datetime.now().astimezone()
@@ -158,6 +178,8 @@ class Agent:
         self._modes: dict[tuple[str, int], Mode] = {}
         self._obs_info: ObsInfo | None = None
         self._stopping = threading.Event()
+        self._shutting_down = False
+        self._probe_active = False
         self._recovering = threading.Lock()
         self._exclude: frozenset[int] = frozenset()
         self._exclude_at = 0.0
@@ -213,7 +235,16 @@ class Agent:
             self.post(Cancel())
             self.post(Disarm())
             with contextlib.suppress(Exception):
+                self.d.ui.close_countdown()
+            with contextlib.suppress(Exception):
                 self.d.ui.notice("refused.title", "notify.countdown_failed")
+        elif isinstance(cmd, ShowReminder):
+            # The reminder must not vanish silently (§2.6, §2.8): sound and tray blink.
+            with contextlib.suppress(Exception):
+                self.d.ui.backend.play_sound()
+            with contextlib.suppress(Exception):
+                self.d.ui.backend.set_blink(True)
+                threading.Timer(5.0, self.d.ui.backend.set_blink, args=(False,)).start()
         elif isinstance(cmd, BeginSession):
             self.d.ui.notice("app.title", "notify.session_failed")
             self.post(Cancel())
@@ -225,7 +256,11 @@ class Agent:
             self.post(PostprocessDone(ok=False))
         elif isinstance(cmd, WriteSessionJson):
             self.d.ui.notice("app.title", "notify.session_failed")
-            self._records.pop(cmd.session_id, None)
+            if cmd.status == "recording":
+                # Metadata (consent reference!) cannot be stored: stop instead of recording on.
+                self.post(ManualStop())
+            else:
+                self._records.pop(cmd.session_id, None)
 
     def _loop(self) -> None:
         while True:
@@ -259,7 +294,14 @@ class Agent:
     def poll_once(self) -> None:
         """One probe + classify step (only while armed: disarmed means nothing is read)."""
         if self.machine.state is State.DISARMED:
+            if self._probe_active:
+                # Disarmed means nothing is read: stop the helper (window titles, §3.1); it
+                # starts again lazily with the next armed snapshot (same thread, no race).
+                self._probe_active = False
+                with contextlib.suppress(Exception):
+                    self.d.probe.close()
             return
+        self._probe_active = True
         snap = self.d.probe.snapshot()
         ctx = classify(
             snap,
@@ -302,6 +344,8 @@ class Agent:
     def arm_blockers(self, consent_ref: str | None) -> tuple[str, ...]:
         c = self.cfg.consent
         blockers: list[str] = []
+        if self._stopping.is_set() or self._shutting_down:
+            blockers.append("shutting_down")
         if not self.d.terms_accepted():
             blockers.append("terms_not_accepted")  # DISCLAIMER.md acceptance gate (R-59)
         ref = (consent_ref or "").strip()
@@ -349,9 +393,8 @@ class Agent:
         if self.cfg.consent.ask_consent_ref_on_arm:
             ref = self.d.ui.ask_consent_ref()
             if ref is None:
-                # Cancelled, or no dialog available: arming needs the user's explicit answer.
-                log.info("arming from the tray cancelled (no consent reference)")
-                return
+                log.info("arming from the tray cancelled (no consent reference entered)")
+                return  # cancel, timeout or no dialog: never arm (§2.1)
         self.arm(ref)
 
     # ---- executor --------------------------------------------------------------------------
@@ -383,8 +426,7 @@ class Agent:
                 ui.notice("disarmed.title", "tray.disarmed")
             log.info("disarmed (%s)", cmd.reason)
         elif isinstance(cmd, PrewarmObs):
-            if self._obs_info is None:
-                threading.Thread(target=self._prewarm, daemon=True).start()
+            threading.Thread(target=self._prewarm, daemon=True).start()
         elif isinstance(cmd, NotifyCountdown):
             problem = self._preflight()
             if problem is not None:
@@ -395,7 +437,7 @@ class Agent:
                 return
             level = ui.countdown(cmd.app_id, cmd.seconds)
             log.info("countdown for %s (fallback level %d)", cmd.app_id, level)
-            self.post(CountdownShown(cmd.session_id))
+            self.post(CountdownShown(cmd.session_id))  # the countdown runs from now on
         elif isinstance(cmd, CloseCountdown):
             ui.close_countdown()
         elif isinstance(cmd, BeginSession):
@@ -444,7 +486,7 @@ class Agent:
     def _preflight(self) -> str | None:
         """Checks right before a countdown: acceptance, visible indicator and exposure rule."""
         if not self.d.terms_accepted():
-            return "terms_not_accepted"
+            return "terms_not_accepted"  # revoked or changed text since arming (R-59)
         if not self._tray_ok():
             return "no_tray"
         if self.cfg.obs.exposure_policy == "require_firewall" and not self.d.exposure_ok():
@@ -457,6 +499,8 @@ class Agent:
                 self._obs_info = self.d.obs.ensure_running()
         except Exception:
             log.warning("OBS could not be started")
+            return
+        self.post(ObsBack())  # clears an earlier loss, whatever obs.launch_on says
 
     def _begin_session(self, cmd: BeginSession) -> None:
         info = self._obs_info
@@ -481,6 +525,7 @@ class Agent:
         if self._indicator_lost:
             record.add_warning("ui:indicator_lost")
         self._records[cmd.session_id] = record
+        record.write()  # before any media: crash recovery and the consent reference need it
         log.info("session %s begins (app %s)", cmd.session_id, ctx.app_id)
 
     def _start_segment(self, cmd: StartSegment) -> None:
@@ -726,6 +771,7 @@ class Agent:
 
     def shutdown(self) -> None:
         """Stop and finalise a running session, then stop all threads."""
+        self._shutting_down = True  # arm_blockers refuses from now on
         if self.machine.state is not State.DISARMED:
             try:
                 self.submit(Disarm(), timeout_s=120)

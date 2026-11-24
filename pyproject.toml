@@ -78,7 +78,7 @@ mypy_path = "src"
 files = ["src"]
 
 [[tool.mypy.overrides]]
-module = ["keyring.*", "pystray.*", "desktop_notifier.*", "PIL.*"]
+module = ["keyring.*", "pystray.*", "desktop_notifier.*", "PIL.*", "AppKit", "Foundation", "PyObjCTools.*"]
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]

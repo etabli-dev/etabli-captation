@@ -72,6 +72,38 @@ def _os_release() -> dict[str, str]:
     return out
 
 
+def crash_upload_check(module: object, config_dir: Path) -> Check:
+    """OBS crash-report egress (docs/principles.md §3.4) from the platform module's facts.
+
+    Until a platform verified how OBS uploads crash reports (``CRASH_UPLOAD_URL_KEY``), every
+    crash-related ini key is listed. macOS (PF-106): OBS 33 never uploads on its own; its crash
+    dialog has an opt-in checkbox, and an upload leaves ``CRASH_UPLOAD_URL_KEY`` behind.
+    """
+    reader = getattr(module, "crash_upload_settings", None)
+    found: dict[str, str] = reader(config_dir) if reader is not None else {}
+    url_key = getattr(module, "CRASH_UPLOAD_URL_KEY", None)
+    if url_key is None:
+        return Check(
+            "obs.crash_upload",
+            "warn",
+            "crash-log upload setting: "
+            + (", ".join(f"{k}={v}" for k, v in found.items()) or "not found")
+            + " (key pending verification)",
+            "OBS Settings → General: switch off automatic crash-log upload",
+        )
+    if any(k.endswith(f" {url_key}") for k in found):
+        label = getattr(module, "CRASH_UPLOAD_CONSENT_LABEL", "")
+        return Check(
+            "obs.crash_upload",
+            "warn",
+            "OBS has uploaded a crash report to obsproject.com (Help → Crash Reports)",
+            f"after an OBS crash, leave “{label}” unticked in OBS's crash dialog",
+        )
+    return Check(
+        "obs.crash_upload", "ok", "no automatic crash upload (OBS asks after a crash, opt-in)"
+    )
+
+
 def run_checks(cfg: Config, *, ui_probe: bool = True) -> list[Check]:
     checks: list[Check] = []
     add = checks.append
@@ -142,18 +174,7 @@ def run_checks(cfg: Config, *, ui_probe: bool = True) -> list[Check]:
             )
         else:
             module = importlib.import_module(f"captation.platform.{current_os()}")
-            reader = getattr(module, "crash_upload_settings", None)
-            found = reader(Path(inst.config_dir)) if reader is not None else {}
-            add(
-                Check(
-                    "obs.crash_upload",
-                    "warn",
-                    "crash-log upload setting: "
-                    + (", ".join(f"{k}={v}" for k, v in found.items()) or "not found")
-                    + " (key pending verification)",
-                    "OBS Settings → General: switch off automatic crash-log upload",
-                )
-            )
+            add(crash_upload_check(module, Path(inst.config_dir)))
 
     # websocket password and connection
     try:

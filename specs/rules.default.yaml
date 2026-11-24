@@ -230,6 +230,8 @@ ignore:
     - '(?i)^obs-browser-page(\.exe)?$'
     - '(?i)^captation'
     - '(?i)^captation-probe$'
+    # macOS: ScreenCaptureKit's daemon holds input while OBS captures audio through it (PF-131)
+    - '^replayd$'
   bundle_id:
     - '^com\.obsproject\.obs-studio'
     - '^de\.etabli\.captation'

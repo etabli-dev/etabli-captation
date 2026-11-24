@@ -14,6 +14,7 @@ import asyncio
 import contextlib
 import logging
 import threading
+import time
 from collections.abc import Callable, Coroutine
 from typing import Any, TypeVar
 
@@ -21,6 +22,7 @@ from captation.ui.base import MenuItem, TrayState
 
 log = logging.getLogger(__name__)
 T = TypeVar("T")
+AUTH_CHECK_S = 30.0  # re-check of the notification permission (users can revoke it)
 
 COLOURS = {
     "disarmed": (0x80, 0x80, 0x80),
@@ -40,6 +42,17 @@ def make_icon_image(rgb: tuple[int, int, int], size: int = 64) -> Any:
     return img
 
 
+def _menu_action(cb: Callable[[], None] | None) -> Callable[[Any, Any], None]:
+    """A pystray action ``(icon, item)``. pystray rejects callables with more than two
+    positional parameters, so the callback is bound by closure, not by a default argument."""
+
+    def action(icon: Any, item: Any) -> None:
+        if cb is not None:
+            threading.Thread(target=cb, daemon=True).start()
+
+    return action
+
+
 class PystrayUi:
     """UiBackend on pystray (tray) and desktop-notifier (notifications)."""
 
@@ -56,6 +69,8 @@ class PystrayUi:
         self._loop_thread = threading.Thread(target=self._loop.run_forever, daemon=True)
         self._notifier: Any = None
         self._capabilities: set[str] = set()
+        self._authorised = False
+        self._authorised_at = 0.0
         self._handles: dict[int, Any] = {}
         self._next_id = 0
         self._tray_ok = False
@@ -74,13 +89,9 @@ class PystrayUi:
             if item.separator:
                 items.append(pystray.Menu.SEPARATOR)
                 continue
-            cb = item.callback
-
-            def action(icon: Any, _item: Any, cb: Callable[[], None] | None = cb) -> None:
-                if cb is not None:
-                    threading.Thread(target=cb, daemon=True).start()
-
-            items.append(pystray.MenuItem(item.label, action, enabled=item.enabled))
+            items.append(
+                pystray.MenuItem(item.label, _menu_action(item.callback), enabled=item.enabled)
+            )
         return pystray.Menu(*items)
 
     # ---- UiBackend -----------------------------------------------------------------------
@@ -116,23 +127,54 @@ class PystrayUi:
         self._capabilities = {"body"} | ({"actions"} if "buttons" in names else set())
 
     def tray_available(self) -> bool:
-        return self._tray_ok and self._icon is not None
+        return self._tray_ok and self._icon is not None and self._icon_visible()
+
+    def _icon_visible(self) -> bool:
+        """Platform back ends override this with a check of the real menu-bar item."""
+        return True
+
+    def _ui(self, fn: Callable[[], None]) -> None:
+        """Run a change of the tray item; macOS marshals it to the main thread (AppKit)."""
+        fn()
 
     def notification_capabilities(self) -> set[str]:
-        return set(self._capabilities)
+        """Empty while the OS denies notifications for this app (checked at most every
+        ``AUTH_CHECK_S``): the countdown then uses the full fallback (§2.8)."""
+        if not self._capabilities:
+            return set()
+        check = getattr(self._notifier, "has_authorisation", None)
+        if check is None:
+            return set(self._capabilities)  # back end without a permission model
+        if self._authorised_at == 0.0 or time.monotonic() - self._authorised_at > AUTH_CHECK_S:
+            try:
+                self._authorised = bool(self._run(check()))
+            except Exception:
+                self._authorised = False
+            self._authorised_at = time.monotonic()
+        return set(self._capabilities) if self._authorised else set()
 
     def set_state(self, state: TrayState, tooltip_title: str, tooltip_body: str) -> None:
         self.state = state
         self._tooltip = f"{tooltip_title}\n{tooltip_body}"
-        if self._icon is not None:
-            self._icon.icon = make_icon_image(COLOURS[state])
-            self._icon.title = self._tooltip[:127]  # Windows tooltip limit
+        icon, image, title = self._icon, make_icon_image(COLOURS[state]), self._tooltip[:127]
+        if icon is not None:
+
+            def apply() -> None:
+                icon.icon = image
+                icon.title = title  # Windows tooltip limit
+
+            self._ui(apply)
 
     def set_menu(self, items: list[MenuItem]) -> None:
         self._menu = list(items)
-        if self._icon is not None:
-            self._icon.menu = self._pystray_menu()
-            self._icon.update_menu()
+        icon, menu = self._icon, self._pystray_menu()
+        if icon is not None:
+
+            def apply() -> None:
+                icon.menu = menu
+                icon.update_menu()
+
+            self._ui(apply)
 
     def set_blink(self, on: bool) -> None:
         if on and not self._blink:
@@ -148,9 +190,15 @@ class PystrayUi:
         phase = False
         while not self._blink_stop.wait(0.5):
             phase = not phase
-            if self._icon is not None:
+            icon = self._icon
+            if icon is not None:
                 key = "attention" if phase else self.state
-                self._icon.icon = make_icon_image(COLOURS[key])
+                image = make_icon_image(COLOURS[key])
+
+                def apply(icon: Any = icon, image: Any = image) -> None:
+                    icon.icon = image
+
+                self._ui(apply)
 
     def notify(
         self,
@@ -210,14 +258,20 @@ class PystrayUi:
         """Platform modules override this with a native input dialog."""
         return None
 
-    def run_main_loop(self, stop: threading.Event) -> None:
+    def run_main_loop(
+        self, stop: threading.Event, on_terminate: Callable[[], None] | None = None
+    ) -> None:
         if self._icon is None:
             stop.wait()
             return
 
         def watcher(icon: Any) -> None:
-            icon.visible = True
-            self._set_tray(bool(getattr(icon, "visible", True)))
+            def show() -> None:
+                icon.visible = True
+                self._set_tray(bool(getattr(icon, "visible", True)))
+
+            self._ui(show)
+            self._on_loop_running(stop, on_terminate)
             stop.wait()
             self._set_tray(False)
             icon.stop()
@@ -232,6 +286,12 @@ class PystrayUi:
         if changed and self._on_tray_change is not None:
             with contextlib.suppress(Exception):
                 self._on_tray_change(ok)
+
+    def _on_loop_running(
+        self, stop: threading.Event, on_terminate: Callable[[], None] | None
+    ) -> None:
+        """Hook for platform back ends once the tray run loop runs (macOS: signals)."""
+        return None
 
     def stop(self) -> None:
         if self._icon is not None:

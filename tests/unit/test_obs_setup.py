@@ -203,6 +203,25 @@ def test_facts_encoders_render_and_write(tmp_path: Path) -> None:
     assert text.count("facts:linux:begin") == 1 and "Websocket bind" in text
 
 
+def test_facts_dump_redacts_hardware_uuids() -> None:
+    """The dump goes into the public docs: no display or device UUIDs (audit 2026-11-24)."""
+    uuid = "12345678-9ABC-DEF0-1234-56789ABCDEF0"
+    data = {
+        "obs_version": "33.0.3",
+        "ws_version": "5.7.6",
+        "platform": "macOS",
+        "request_count": 1,
+        "set_record_directory": True,
+        "encoders": {"audio": [], "video": []},
+        "input_kinds": ["display_capture"],
+        "defaults": {"display_capture": {"display_uuid": uuid, "crop": [uuid.lower()], "n": 0}},
+        "list_items": {},
+    }
+    section = facts.render_section("macos", data, {})
+    assert uuid not in section and uuid.lower() not in section
+    assert '"display_uuid": "\\u2026"' in section and '"n": 0' in section
+
+
 # ---- firewall -----------------------------------------------------------------------------
 
 

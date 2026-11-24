@@ -47,6 +47,10 @@ SCREEN_WINDOW = 1  # PF-110 (needs a CGWindowID; not used)
 SCREEN_APPLICATION = 2  # PF-110
 SCREEN_APPLICATION_KEY = "application"  # PF-110
 SCREEN_SHOW_CURSOR = "show_cursor"  # PF-110
+# screen_capture defaults to an empty display_uuid, which records black frames; the default of
+# display_capture names the main display in the same UUID format (PF-130).
+SCREEN_DISPLAY_UUID = "display_uuid"  # PF-130
+DISPLAY_CAPTURE = "display_capture"  # PF-130
 
 # ---- Encoders (PF-111): for kinds.VIDEO_ENCODERS_HARDWARE["macos"] ---------------------------
 VIDEO_ENCODERS_HARDWARE = ("com.apple.videotoolbox.videoencoder.ave.avc",)  # PF-111
@@ -63,7 +67,8 @@ LAUNCH_FLAGS = (
 # ---- List properties for the macOS facts dump (PF-108, PF-109, PF-110) ------------------------
 FACT_LIST_PROPERTIES = {
     SCK_AUDIO: (SCK_AUDIO_TYPE, SCK_AUDIO_APPLICATION_KEY),
-    SCREEN_CAPTURE: (SCREEN_TYPE, SCREEN_APPLICATION_KEY),
+    # Not `application`: listing it crashes OBS 33.0.3 / obs-websocket 5.7.6 (PF-129).
+    SCREEN_CAPTURE: (SCREEN_TYPE,),
     COREAUDIO_INPUT: (MIC_DEVICE,),
 }
 # Properties whose item *values* are enums (safe to print); other items are app/device names.
@@ -85,6 +90,7 @@ class MacCaptureProfile(CaptureProfile):
     mic_default = MIC_DEFAULT
     screen_token_key: str | None = None
     needs_screen_token = False
+    main_display: tuple[str, str] | None = (DISPLAY_CAPTURE, SCREEN_DISPLAY_UUID)
 
     def can_target_app(self, bundle_id: str | None) -> bool:
         """ScreenCaptureKit targets applications by bundle ID only."""

@@ -198,8 +198,9 @@ def parse_analysis(stderr: str, duration_s: float | None) -> QcResult:
     )
 
 
-def analyse(path: Path, silence_dbfs: float) -> QcResult:
-    """RMS/peak (``astats``) and silence (``silencedetect``, min 1 s) of the first audio stream.
+def analyse(path: Path, silence_dbfs: float, stream: int = 0) -> QcResult:
+    """RMS/peak (``astats``) and silence (``silencedetect``, min 1 s) of one audio stream
+    (default: the first).
 
     Output goes to the ``null`` muxer; the file is only read.
     """
@@ -218,7 +219,7 @@ def analyse(path: Path, silence_dbfs: float) -> QcResult:
             "-i",
             media_arg(path),
             "-map",
-            "0:a:0",
+            f"0:a:{stream}",
             "-af",
             analysis_filter,
             "-f",

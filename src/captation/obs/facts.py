@@ -18,6 +18,19 @@ from captation.obs import kinds
 from captation.obs.client import ObsError, ObsWebSocket
 
 SCRATCH_SCENE = "Captation Facts Scratch"
+# Display and device UUIDs identify this machine's hardware; the dump goes into a public doc.
+_UUID = re.compile(r"[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}")
+
+
+def _redact(value: Any) -> Any:
+    """Replace UUIDs in default settings with ``…`` (structure and keys stay)."""
+    if isinstance(value, str):
+        return _UUID.sub("…", value)
+    if isinstance(value, dict):
+        return {k: _redact(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_redact(v) for v in value]
+    return value
 
 
 def available_encoders(config_dir: Path) -> dict[str, set[str]]:
@@ -130,7 +143,7 @@ def render_section(os_name: str, facts: dict[str, Any], extra: dict[str, str]) -
     lines += [f"- {k}: {v}" for k, v in extra.items()]
     lines += ["", "| Input kind | Default settings |", "|---|---|"]
     for kind in facts["input_kinds"]:
-        defaults = json.dumps(facts["defaults"].get(kind), sort_keys=True)
+        defaults = json.dumps(_redact(facts["defaults"].get(kind)), sort_keys=True)
         lines.append(f"| `{kind}` | `{defaults}` |")
     if facts["list_items"]:
         lines += ["", "| List property | Items |", "|---|---|"]

@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import logging
 import subprocess
+import threading
 from collections.abc import Callable
 from typing import Any
 
@@ -58,6 +59,8 @@ class MacUi(PystrayUi):
         super().__init__()
         self._popen = popen
         self._run_cmd = run
+        self._loop_running = threading.Event()
+        self._terminate_observer: Any = None
 
     def play_sound(self) -> None:
         try:
@@ -84,6 +87,105 @@ class MacUi(PystrayUi):
         except (OSError, subprocess.TimeoutExpired):
             return None
         return out.stdout.strip() if out.returncode == 0 else None
+
+    # ---- AppKit threading, real visibility, run-loop signals (audit 2026-11-24) ------------
+
+    def _ui(self, fn: Callable[[], None]) -> None:
+        """AppKit is main-thread only: tray changes from the agent threads are queued onto the
+        Cocoa run loop. A failing change is logged; the next refresh repeats it."""
+
+        def guarded() -> None:
+            try:
+                fn()
+            except Exception:
+                log.exception("tray: update failed")
+
+        if _on_main_thread():
+            guarded()
+        else:
+            from PyObjCTools import AppHelper
+
+            AppHelper.callAfter(guarded)
+
+    def _icon_visible(self) -> bool:
+        """The menu-bar item really exists and is shown (not only the pystray object): the
+        NSStatusItem is visible and its button has a visible window. Read on the main thread;
+        no answer within ``VISIBILITY_TIMEOUT_S`` counts as not visible (fail closed, §2.5)."""
+        item = getattr(self._icon, "_status_item", None)  # not-a-fact: pystray darwin internals
+        if item is None:
+            return True  # not pystray's AppKit back end (tests)
+
+        def check() -> bool:
+            button = item.button()
+            window = button.window() if button is not None else None
+            return bool(item.isVisible()) and window is not None and bool(window.isVisible())
+
+        if _on_main_thread():
+            return check()
+        if not self._loop_running.is_set():
+            return False
+        answer: list[bool] = []
+        done = threading.Event()
+
+        def ask() -> None:
+            try:
+                answer.append(check())
+            finally:
+                done.set()
+
+        from PyObjCTools import AppHelper
+
+        AppHelper.callAfter(ask)
+        return done.wait(VISIBILITY_TIMEOUT_S) and bool(answer and answer[0])
+
+    def _on_loop_running(
+        self, stop: threading.Event, on_terminate: Callable[[], None] | None
+    ) -> None:
+        """Called once NSApplication runs. Python signal handlers cannot run while the main
+        thread sits in ``NSApp.run()``, and pystray turns SIGINT into ``NSApp terminate:``
+        (process exit without cleanup). Mach-port handlers run on the run loop instead and
+        only set ``stop``; an ``NSApplicationWillTerminate`` observer runs ``on_terminate``
+        when AppKit ends the process itself (logout)."""
+        from PyObjCTools import AppHelper
+
+        def install() -> None:
+            import signal
+
+            from AppKit import NSApplicationWillTerminateNotification
+            from Foundation import NSNotificationCenter
+            from PyObjCTools import MachSignals
+
+            def on_signal(signum: int) -> None:
+                log.info("signal %d: stopping", signum)
+                stop.set()
+
+            for signum in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP):
+                MachSignals.signal(signum, on_signal)
+
+            def will_terminate(note: Any) -> None:
+                log.info("AppKit terminates the process: shutting down first")
+                stop.set()
+                if on_terminate is not None:
+                    on_terminate()
+
+            center = NSNotificationCenter.defaultCenter()
+            self._terminate_observer = center.addObserverForName_object_queue_usingBlock_(
+                NSApplicationWillTerminateNotification, None, None, will_terminate
+            )
+            self._loop_running.set()
+
+        AppHelper.callAfter(install)
+
+
+VISIBILITY_TIMEOUT_S = 2.0
+
+
+def _on_main_thread() -> bool:
+    try:
+        from Foundation import NSThread
+    except ImportError:  # not on macOS (unit tests on other OSes)
+        return True
+    return bool(NSThread.isMainThread())
 
 
 def backend() -> MacUi:

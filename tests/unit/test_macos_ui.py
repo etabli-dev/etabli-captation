@@ -72,3 +72,70 @@ def test_ask_text(result: Any, exc: BaseException | None, expected: str | None) 
     [(argv, kw)] = run.calls
     assert argv[-2:] == ["Studienmodus", "Einwilligungsreferenz"]
     assert kw["timeout"] == mac_ui.DIALOG_TIMEOUT_S and kw["check"] is False
+
+
+def test_menu_builds_with_the_real_pystray() -> None:
+    """pystray accepts actions with at most two parameters (crashed the agent on macOS)."""
+    import threading
+
+    pystray = pytest.importorskip("pystray")
+    from captation.ui.base import MenuItem
+
+    fired = threading.Event()
+    ui = PystrayUi()
+    ui._menu = [MenuItem("Arm", fired.set), MenuItem("", separator=True), MenuItem("Off", None)]
+    menu = ui._pystray_menu()
+    assert isinstance(menu, pystray.Menu)
+    arm = next(i for i in menu.items if i.text == "Arm")
+    arm(None)  # pystray calls the action with (icon, item)
+    assert fired.wait(2)
+
+
+SIGNAL_SCRIPT = """
+import sys, threading, time
+from captation.ui.macos import MacUi
+ui = MacUi()
+ui.start()
+stop = threading.Event()
+def report():
+    deadline = time.monotonic() + 10
+    while not ui._loop_running.is_set() and time.monotonic() < deadline:
+        time.sleep(0.05)
+    print("visible", ui.tray_available(), flush=True)
+    print("ready", flush=True)
+threading.Thread(target=report, daemon=True).start()
+try:
+    ui.run_main_loop(stop, on_terminate=lambda: print("terminate-hook", flush=True))
+finally:
+    print("finally", flush=True)
+"""
+
+
+@pytest.mark.macos
+@pytest.mark.parametrize("signame", ["SIGTERM", "SIGINT"])
+def test_signals_stop_the_cocoa_run_loop_cleanly(signame: str) -> None:
+    """SIGTERM (launchd, logout) and SIGINT must reach the agent while NSApp.run() owns the
+    main thread, and the caller's cleanup (``finally``) must run (audit 2026-11-24)."""
+    import signal
+    import sys
+    import time
+
+    proc = subprocess.Popen(
+        [sys.executable, "-c", SIGNAL_SCRIPT], stdout=subprocess.PIPE, text=True
+    )
+    try:
+        lines = []
+        assert proc.stdout is not None
+        for line in proc.stdout:
+            lines.append(line.strip())
+            if line.strip() == "ready":
+                break
+        assert "visible True" in lines  # the real NSStatusItem exists and is shown
+        sent = time.monotonic()
+        proc.send_signal(getattr(signal, signame))
+        out, _ = proc.communicate(timeout=10)
+        assert time.monotonic() - sent < 5
+        assert "finally" in out.split()
+        assert proc.returncode == 0
+    finally:
+        proc.kill()

@@ -64,6 +64,11 @@ SPACE = " "  # not-a-fact: separator
 COMMA = ", "  # not-a-fact: separator
 MSG_SKIPPED = "websocket not listening publicly: connection test skipped"  # not-a-fact: text
 MSG_BLOCKED = "connection from every non-loopback local address was blocked"  # not-a-fact: text
+MSG_NO_IFCONFIG = "local addresses unknown (ifconfig failed): not verified"  # not-a-fact: text
+MSG_NO_ADDRESS = (
+    "no non-loopback address: the port is not reachable from a network"  # not-a-fact: text
+)
+LOOPBACK_V4 = "127.0.0.1"  # not-a-fact: IPv4 loopback address
 
 
 def pf_rules(port: int) -> str:
@@ -80,9 +85,12 @@ def pf_rules(port: int) -> str:
 def boot_script() -> str:
     """What the LaunchDaemon runs (as root): main ruleset present, pf enabled with our own
     reference (the previous one released), anchor loaded (PF-123)."""
-    has_main = f"{PFCTL} -s Anchors 2>/dev/null | {GREP} -q 'com\\.apple'"  # PF-123
+    # Load the stock /etc/pf.conf only if no main ruleset is loaded at all: another tool's
+    # ruleset (VPN kill switch …) is never replaced. `-s Anchors` would also list our own
+    # anchor and so could not tell whether the main ruleset references it (audit 2026-11-24).
+    main_empty = f'[ -z "$({PFCTL} -sr 2>/dev/null)" ]'  # PF-123
     return (
-        f"{has_main} || {PFCTL} -q -f {PF_CONF}\n"  # PF-123
+        f"{main_empty} && {PFCTL} -q -f {PF_CONF}\n"  # PF-123
         f"t={TOKEN_FILE}\n"
         f'[ -s "$t" ] && {PFCTL} -X "$({CAT} "$t")" >/dev/null 2>&1\n'
         f"{PFCTL} -E 2>&1 | {SED} -n 's/^Token : //p' > \"$t\"\n"  # PF-123
@@ -168,8 +176,12 @@ def listening_publicly(port: int, runner: Runner = _run) -> bool:
     return any(h not in LOOPBACK_HOSTS for h in parse_lsof_listen(out.stdout))
 
 
-def local_addresses(runner: Runner = _run) -> list[str]:
-    return parse_ifconfig(runner([IFCONFIG]).stdout)
+def local_addresses(runner: Runner = _run) -> list[str] | None:
+    """Non-loopback local addresses; ``None`` if ``ifconfig`` failed (never "none found")."""
+    out = runner([IFCONFIG])
+    if out.returncode != 0 or not out.stdout.strip():
+        return None
+    return parse_ifconfig(out.stdout)
 
 
 def artefacts_ok(port: int, *, rule_file: Path = RULE_FILE, plist: Path = DAEMON_PLIST) -> bool:
@@ -198,10 +210,18 @@ def check(
     details.append(f"pf rules for port {port}: {'present' if present else 'missing'}")
     if not present:
         return FirewallStatus(False, METHOD, details)
-    if not listening_publicly(port, runner):
+    # "Listening" is decided by a loopback connection (allowed by our rule), not by lsof:
+    # a failed or slow lsof must never turn into "not listening, nothing to test".
+    if not connect(LOOPBACK_V4, port):
         details.append(MSG_SKIPPED)
         return FirewallStatus(True, METHOD, details)
     addresses = local_addresses(runner)
+    if addresses is None:
+        details.append(MSG_NO_IFCONFIG)
+        return FirewallStatus(False, METHOD, details)
+    if not addresses:
+        details.append(MSG_NO_ADDRESS)
+        return FirewallStatus(True, METHOD, details)
     with ThreadPoolExecutor(max_workers=max(1, min(32, len(addresses)))) as pool:
         results = list(pool.map(lambda a: connect(a, port), addresses))
     reachable = [a for a, ok in zip(addresses, results, strict=True) if ok]

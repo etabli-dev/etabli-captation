@@ -167,9 +167,20 @@ def test_disk_encryption_boot_volume_and_other_volumes(tmp_path: Path) -> None:
         enc = MacDiskEncryption(
             runner_for([], {"info": (code, out)}),
             data_volume=tmp_path,
-            device_of=lambda p: 2 if p == data else 1,
+            device_of=lambda p: 2 if p in (data, Path("/Volumes/X")) else 1,
+            mount_point_of=lambda p: Path("/Volumes/X"),
         )
         return enc.status(data)
+
+    # diskutil gets the volume's mount point, never the folder itself (PF-121)
+    calls = []
+    MacDiskEncryption(
+        runner_for(calls, {"info": (0, plistlib.dumps({"FileVault": True}).decode())}),
+        data_volume=tmp_path,
+        device_of=lambda p: 2 if p in (data, Path("/Volumes/X")) else 1,
+        mount_point_of=lambda p: Path("/Volumes/X"),
+    ).status(data)
+    assert calls == [["/usr/sbin/diskutil", "info", "-plist", "/Volumes/X"]]
 
     assert other({"FileVault": True, "MountPoint": "/Volumes/X"}) == "encrypted"
     assert other({"FileVault": False}) == "unencrypted"
@@ -194,6 +205,8 @@ def test_launch_agent_definition() -> None:
     ]
     assert d["RunAtLoad"] is True and d["KeepAlive"] == {"SuccessfulExit": False}
     assert d["LimitLoadToSessionType"] == "Aqua" and d["ProcessType"] == "Interactive"
+    # time to stop and finalise a recording on logout; no 10 s restart loop on a broken install
+    assert d["ExitTimeOut"] == 60 and d["ThrottleInterval"] == 60
     assert d["StandardOutPath"].endswith("captation/launchd.out.log")
     assert d["StandardErrorPath"].endswith("captation/launchd.err.log")
     assert d["EnvironmentVariables"] == {"PATH": "/usr/bin:/bin"}
@@ -319,3 +332,78 @@ def test_real_fdesetup_and_locator() -> None:
     if inst is None:
         pytest.skip("OBS is not installed in /Applications")
     assert inst.version is not None
+
+
+def test_mount_point(tmp_path: Path) -> None:
+    assert macos.mount_point(Path("/")) == Path("/")
+    found = macos.mount_point(tmp_path / "missing" / "deeper")
+    assert found == Path("/") or found.is_mount()
+
+
+@pytest.mark.macos
+def test_real_diskutil_on_mount_point() -> None:
+    """On the Mac: diskutil answers for a mount point with a boolean FileVault key (PF-121)."""
+    out = subprocess.run(
+        ["/usr/sbin/diskutil", "info", "-plist", str(macos.mount_point(Path.home()))],
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+    assert out.returncode == 0
+    assert isinstance(plistlib.loads(out.stdout.encode()).get("FileVault"), bool)
+
+
+# ---- crash-report egress (PF-106) ------------------------------------------------------------
+
+
+def test_crash_upload_check_from_platform_facts(tmp_path: Path) -> None:
+    from types import SimpleNamespace
+
+    from captation.doctor import crash_upload_check
+
+    clean = crash_upload_check(macos, tmp_path)
+    assert clean.level == "ok"
+    (tmp_path / "global.ini").write_text(
+        "[CrashHandler]\nlast_crash_log_file=/x.ips\nlast_crash_log_url=https://example.invalid/c\n",
+        encoding="utf-8",
+    )
+    uploaded = crash_upload_check(macos, tmp_path)
+    assert uploaded.level == "warn" and "uploaded a crash report" in uploaded.detail
+    assert macos.CRASH_UPLOAD_CONSENT_LABEL in uploaded.fix
+    assert "example.invalid" not in uploaded.detail  # the report URL is not echoed
+    # a platform without a verified upload key keeps listing every crash key
+    pending = crash_upload_check(
+        SimpleNamespace(crash_upload_settings=macos.crash_upload_settings), tmp_path
+    )
+    assert pending.level == "warn" and "pending verification" in pending.detail
+
+
+def test_disk_encryption_resolves_symlinks_and_never_guesses(tmp_path: Path) -> None:
+    """A data root behind a symlink is judged on its real volume (audit 2026-11-24)."""
+    real = tmp_path / "external" / "CaptationData"
+    real.mkdir(parents=True)
+    link = tmp_path / "CaptationData"
+    link.symlink_to(real)
+    seen: list[Path] = []
+
+    def mount_point_of(p: Path) -> Path:
+        seen.append(p)
+        return Path("/Volumes/Ext")
+
+    info = plistlib.dumps({"FileVault": False}).decode()
+    enc = MacDiskEncryption(
+        runner_for([], {"info": (0, info)}),
+        data_volume=tmp_path / "boot",
+        device_of=lambda p: 7 if p in (real, Path("/Volumes/Ext")) else 1,
+        mount_point_of=mount_point_of,
+    )
+    assert enc.status(link) == "unencrypted"
+    assert seen == [real]
+    # the walk ended on another device than the data: never guess "encrypted"
+    lost = MacDiskEncryption(
+        runner_for([], {"info": (0, plistlib.dumps({"FileVault": True}).decode())}),
+        data_volume=tmp_path / "boot",
+        device_of=lambda p: 7 if p == real else 1,
+        mount_point_of=lambda p: Path("/"),
+    )
+    assert lost.status(link) == "unknown"

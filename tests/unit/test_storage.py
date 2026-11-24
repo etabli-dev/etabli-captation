@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 import shutil
 import socket
@@ -256,6 +257,9 @@ def test_retention_deletes_only_old_finished_sessions(
     broken = tmp_path / "data" / "unassigned" / "S-20200101-000000-0004"
     broken.mkdir()
     (tmp_path / "data" / "not-a-session").mkdir()
+    # session.json was written when the session ended (retention also counts from the write)
+    for rec, at in ((old, now - timedelta(days=40)), (recent, now - timedelta(days=3))):
+        os.utime(rec.session_file, (at.timestamp(), at.timestamp()))
 
     cfg_off = make_config(tmp_path)
     assert cfg_off.storage.retention_days is None
@@ -273,3 +277,13 @@ def test_retention_deletes_only_old_finished_sessions(
     assert (tmp_path / "data" / "not-a-session").exists()
     assert old.session_id in caplog.text
     assert str(tmp_path) not in caplog.text
+
+
+@pytest.mark.req("R-47")
+def test_retention_keeps_a_fresh_import_with_an_old_device_date(tmp_path: Path) -> None:
+    """A recorder with a wrong clock must not get a just-imported session deleted."""
+    now = datetime.now().astimezone()
+    imported = _session_at(tmp_path, now - timedelta(days=4000), "complete", "0005")
+    cfg = make_config(tmp_path, {"storage.retention_days": 365})
+    assert apply_retention(cfg, now) == []
+    assert imported.directory.exists()

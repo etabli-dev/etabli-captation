@@ -154,6 +154,14 @@ has to be checked on another operating system says what is pending there.
 - **Decision (accepted for Linux):** strategy **B**, 128×72 at 30 fps, audio `pcm_s24le`
   (first available entry of `codec_preference`). Post-processing writes `segNN_audio.mka`
   without the dummy video. Re-check A on macOS/Windows only if B fails there.
+- **Measurements (macOS 27.0.1, Apple M1, OBS 33.0.3, PF-112, 2026-11-23):** B as bootstrapped
+  (128×72 at 30 fps, `obs_x264`, 3 × `ffmpeg_pcm_s24le`, MKV) → `h264 128x72 30/1` + 3 ×
+  `pcm_s24le 48000`; input setup 0.82 s, stop 0.66 s. OBS CPU while recording 13.5 % of one core
+  (idle 2.5–3.3 %; Linux 3.8–4.6 %), with `sck_audio_capture` in desktop mode as remote source,
+  so the < 5 % criterion **fails on macOS**. The extra load is most likely ScreenCaptureKit, not
+  the 128×72 encode; `replayd` (PF-131) is not included. Video profile (1920×1080, VideoToolbox):
+  14.6–24.2 %. **Open for the stage 03 (macOS) checkpoint:** accept the higher figure on macOS,
+  or measure A and per-app vs desktop SCK audio before deciding.
 - **Verify-by:** integration tests, FFT track-mapping unit tests.
 
 ## ADR-010 — Mic release
@@ -164,6 +172,10 @@ has to be checked on another operating system says what is pending there.
   releases the mic.
 - **Decision (accepted for Linux):** create the Captation inputs at segment start and remove
   them at stop. The alternative (keep the input with no device) is unnecessary at 5 ms.
+- **Measurement (macOS 27.0.1, OBS 33.0.3, PF-112/PF-113, 2026-11-23):** with OBS running and no
+  Captation inputs `captation-probe --once` lists no mic user; after `prepare_segment` (creates
+  `Captation Local` and the SCK remote input, 0.41–1.11 s) → `OBS`, `replayd`; after
+  `teardown_segment` → none. The decision holds on macOS.
 - **Verify-by:** end-to-end scenario E5 (60 s idle, armed, OBS running → no session).
 
 ## ADR-013 — OBS 33 has no `--disable-shutdown-check`

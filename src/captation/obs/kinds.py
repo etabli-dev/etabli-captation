@@ -111,6 +111,9 @@ class CaptureProfile:
     mic_default = MIC_DEFAULT
     screen_token_key: str | None = SCREEN_RESTORE_TOKEN
     needs_screen_token = True
+    # (input kind, settings key): OBS's default for that kind names the main display; the
+    # controller copies it into the display-capture settings when they lack the key (macOS).
+    main_display: tuple[str, str] | None = None
 
     def can_target_app(self, bundle_id: str | None) -> bool:
         """Whether per-app capture can target the app (Linux: by executable name, always)."""

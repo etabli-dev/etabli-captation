@@ -24,10 +24,12 @@ from captation.session import (
     BeginSession,
     Cancel,
     CountdownElapsed,
+    CountdownShown,
     Disarm,
     Event,
     LowDisk,
     ManualStop,
+    NotifyCountdown,
     ObsBack,
     ObsLost,
     PostprocessDone,
@@ -369,8 +371,9 @@ TABLE: dict[str, tuple[tuple[str, ...], Row]] = {
         (
             State.STOPPING,
             [(1, SegmentStopped(ok=False))],
-            ["MarkSegmentInterrupted(1)", "RunPostprocess", "SetTrayState(armed)"],
-            State.POSTPROCESSING,
+            # unconfirmed stop: OBS may still record → ERROR (indicator on), recovery resets it
+            ["MarkSegmentInterrupted(1)", "Notify(obs_lost)"],
+            State.ERROR,
         ),
     ),
     "stopping--obs-lost": (
@@ -378,13 +381,8 @@ TABLE: dict[str, tuple[tuple[str, ...], Row]] = {
         (
             State.STOPPING,
             [(1, ObsLost())],
-            [
-                "MarkSegmentInterrupted(1)",
-                "Notify(obs_lost)",
-                "RunPostprocess",
-                "SetTrayState(armed)",
-            ],
-            State.POSTPROCESSING,
+            ["MarkSegmentInterrupted(1)", "Notify(obs_lost)"],
+            State.ERROR,
         ),
     ),
     # POSTPROCESSING
@@ -838,3 +836,50 @@ def test_zero_start_debounce_reaches_countdown_in_one_tick() -> None:
     d = Driver(params=replace(PARAMS, start_debounce_s=0.0))
     d.send(Arm(None))
     assert d.send_s(Tick(SIGNAL), 1) == ["BeginSession(signal)", "NotifyCountdown(signal,5)"]
+
+
+# ---- audit 2026-11-24: fail-closed countdown and unconfirmed stops ---------------------------
+
+
+@pytest.mark.req("R-16", "R-17")
+def test_full_countdown_runs_from_the_confirmation() -> None:
+    """Slow pre-flight checks must not eat into the time to cancel (§2.4, audit 2026-11-24)."""
+    d = Driver(ack_countdown=False)
+    d.send(Arm("CR-001"))
+    d.send(Tick(ctx()), 1.0)
+    cmds = d.send(Tick(ctx()), PARAMS.start_debounce_s)
+    assert d.state is State.COUNTDOWN
+    sid = next(c.session_id for c in cmds if isinstance(c, NotifyCountdown))
+    d.send(Tick(ctx()), PARAMS.countdown_seconds - 1.0)  # shown late, but before the deadline
+    d.send(CountdownShown(sid), 0.0)
+    d.send(Tick(ctx()), PARAMS.countdown_seconds - 0.5)
+    assert d.state is State.COUNTDOWN  # the full countdown runs from CountdownShown
+    assert not any(isinstance(c, StartSegment) for c in d.commands())
+    d.send(Tick(ctx()), 0.5)
+    assert d.state is State.RECORDING
+
+
+@pytest.mark.req("R-53", "R-02")
+def test_unconfirmed_stop_after_disarm_never_resumes_recording() -> None:
+    d = goto(State.RECORDING)
+    d.send(Disarm(), 1.0)
+    assert d.state is State.STOPPING
+    d.send(SegmentStopped(ok=False), 1.0)
+    assert d.state is State.ERROR and not d.m.armed
+    cmds = d.send(ObsBack(), 1.0)  # the call is still going on
+    assert not any(isinstance(c, StartSegment) for c in cmds)
+    assert d.state is State.POSTPROCESSING
+
+
+@pytest.mark.req("R-53", "R-16")
+def test_ended_session_never_resumes_after_rearm() -> None:
+    """Found by the property test: disarm → OBS lost while stopping → re-arm → ObsBack must not
+    resume the old session without a new countdown."""
+    d = goto(State.RECORDING)
+    d.send(Disarm(), 1.0)
+    d.send(ObsLost(), 0.5)
+    assert d.state is State.ERROR
+    d.send(Arm("CR-002"), 1.0)
+    cmds = d.send(ObsBack(), 0.5)
+    assert not any(isinstance(c, StartSegment) for c in cmds)
+    assert d.state is State.POSTPROCESSING

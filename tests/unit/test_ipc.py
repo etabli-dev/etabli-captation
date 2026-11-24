@@ -136,3 +136,15 @@ def test_agent_not_running(isolated_dirs: Path) -> None:
 def test_invalid_message_is_refused_client_side() -> None:
     with pytest.raises(ValueError):
         ipc.validate_message({"type": "nope"})
+
+
+def test_socket_path_falls_back_when_too_long(tmp_path: Path) -> None:
+    from captation.ipc import SUN_PATH_MAX, socket_path
+
+    short = Path("/Users/u/Library/Caches/TemporaryItems/captation/agent.sock")
+    assert socket_path(short, tmp_path / "tmp", 501) == short  # fits: used as is, nothing created
+    assert not (tmp_path / "tmp").exists()
+    long_dir = tmp_path / ("x" * (SUN_PATH_MAX + 1))
+    got = socket_path(long_dir / "agent.sock", tmp_path / "tmp", 501)
+    assert got == tmp_path / "tmp" / "etabli-captation-501" / "agent.sock"
+    assert (got.parent.stat().st_mode & 0o777) == 0o700

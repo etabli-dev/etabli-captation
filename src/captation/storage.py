@@ -554,6 +554,14 @@ def apply_retention(cfg: Config, now: datetime) -> list[str]:
         if not isinstance(doc, dict) or doc.get("status") == "recording":
             continue
         stamp = _parse_ts(doc.get("ended_at")) or _parse_ts(doc.get("started_at"))
+        try:
+            # An imported recording carries the device's date (often a wrong clock): its
+            # age counts from when the session was written here, never from earlier.
+            written = datetime.fromtimestamp((session_dir / SESSION_FILE).stat().st_mtime)
+            written = written.astimezone()
+            stamp = written if stamp is None else max(stamp, written)
+        except OSError:
+            pass
         if stamp is None or stamp >= cutoff:
             continue
         try:
@@ -580,7 +588,7 @@ def recover_stale_sessions(cfg: Config, now: datetime) -> list[str]:
             doc = json.loads(path.read_text(encoding="utf-8"))
         except (OSError, ValueError):
             continue
-        if doc.get("status") != "recording":
+        if not isinstance(doc, dict) or doc.get("status") != "recording":
             continue
         stamp = iso_timestamp(now)
         doc["status"] = "interrupted"
@@ -592,6 +600,7 @@ def recover_stale_sessions(cfg: Config, now: datetime) -> list[str]:
         warnings = doc.setdefault("warnings", [])
         if "agent:recovered_after_crash" not in warnings:
             warnings.append("agent:recovered_after_crash")
+        names = _register_recovered_media(session_dir, doc)
         problems = schema_errors(doc, SESSION_SCHEMA)
         if problems:
             log.error("session %s could not be recovered: invalid document", session_dir.name)
@@ -601,6 +610,36 @@ def recover_stale_sessions(cfg: Config, now: datetime) -> list[str]:
         with os.fdopen(fd, "w", encoding="utf-8") as fh:
             json.dump(doc, fh, indent=2, ensure_ascii=False)
         os.replace(tmp, path)
+        if names:
+            from captation.integrity import make_read_only, write_sha256sums
+
+            write_sha256sums(session_dir, names)
+            if cfg.postprocess.make_read_only:
+                for name in names:
+                    make_read_only(session_dir / name)
         recovered.append(session_dir.name)
         log.warning("session %s recovered after an agent crash (interrupted)", session_dir.name)
     return recovered
+
+
+def _register_recovered_media(session_dir: Path, doc: dict[str, Any]) -> list[str]:
+    """OBS containers a crashed agent never registered are added to their segment (with
+    SHA-256 and size), so they are covered by ``SHA256SUMS``. Returns every registered name."""
+    names: list[str] = []
+    for seg in doc.get("segments", []):
+        if not isinstance(seg, dict) or not isinstance(seg.get("index"), int):
+            continue
+        files = seg.setdefault("files", [])
+        known = {f.get("path") for f in files if isinstance(f, dict)}
+        container = session_dir / f"seg{seg['index']:02d}_container.mkv"
+        if container.name not in known and container.is_file() and not container.is_symlink():
+            files.append(
+                {
+                    "role": "container",
+                    "path": container.name,
+                    "sha256": sha256_file(container),
+                    "bytes": container.stat().st_size,
+                }
+            )
+        names += [str(f["path"]) for f in files if isinstance(f, dict) and f.get("path")]
+    return [n for n in names if (session_dir / n).is_file()]

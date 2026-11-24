@@ -170,7 +170,9 @@ class CountdownShown:
     """The executor confirmed that the countdown (with *Cancel*) is visible to the user.
 
     Fail-closed (principles §2.4): without this confirmation a countdown never turns into a
-    recording; it is cancelled when its deadline passes.
+    recording; it is cancelled when its deadline passes. The countdown runs from this
+    confirmation, not from ``NotifyCountdown``: slow pre-flight checks or a slow notification
+    must not eat into the time the participants get to cancel (audit 2026-11-24).
     """
 
     session_id: str
@@ -349,6 +351,7 @@ class _Session:
     failed: bool = False
     recoveries: int = 0
     recording_since: float | None = None
+    ending: bool = False  # a stop was requested: the session ends, it never resumes
 
 
 # ---- the machine ------------------------------------------------------------------------------
@@ -462,6 +465,9 @@ class SessionMachine:
                 s = self._session
                 live = self._state is State.COUNTDOWN and s is not None
                 if live and s is not None and s.session_id == event.session_id:
+                    if not self._countdown_shown:
+                        # The full countdown runs from now on (§2.4).
+                        self._countdown_deadline = now + self._p.countdown_seconds
                     self._countdown_shown = True
             case StartFailed():
                 self._on_start_failed(out)
@@ -536,9 +542,16 @@ class SessionMachine:
             self._state = State.ERROR
             self._lost_since = None
         elif st is State.STOPPING:
+            # After a lost connection OBS may still be writing: wait in ERROR (indicator on)
+            # until the recovery has reset OBS (ObsBack) or given up, never post-process a
+            # growing file.
             self._mark_interrupted(out)
             out.append(Notify(kind))
-            self._begin_postprocess(out)
+            if reason == "stopped":
+                self._begin_postprocess(out)  # OBS ended the recording: the file is final
+            else:
+                self._state = State.ERROR
+                self._lost_since = None
         elif st is State.COUNTDOWN and reason != "stopped":
             self._abort_countdown(out)
             out.append(Notify(kind))
@@ -562,13 +575,16 @@ class SessionMachine:
             return
         s = self._live()
         ctx = self._ctx
-        if s.recoveries >= MAX_RECOVERIES:
+        # Only an OBS loss in the middle of a recording resumes; a session whose stop was
+        # requested (disarm, hang-up, manual stop, low disk) ends here (audit 2026-11-24).
+        resume = self._armed and not s.ending and s.app_id != self._suppressed
+        if resume and s.recoveries >= MAX_RECOVERIES:
             # OBS keeps failing: finalise once instead of restarting forever.
             self._suppress(s.app_id)
             out.append(Notify("start_failed"))
             out.append(Teardown())
             self._begin_postprocess(out)
-        elif ctx is not None and self._same_call(s, ctx) and s.segment < MAX_SEGMENTS:
+        elif resume and ctx is not None and self._same_call(s, ctx) and s.segment < MAX_SEGMENTS:
             s.recoveries += 1
             self._state = State.RECORDING
             mode = self._wanted_mode(s, ctx)
@@ -600,7 +616,12 @@ class SessionMachine:
 
     def _on_segment_stopped(self, ok: bool, out: list[Command]) -> None:
         if not ok:
+            # The stop was not confirmed: OBS may still record. Recover (reset) first.
             self._mark_interrupted(out)
+            out.append(Notify("obs_lost"))
+            self._state = State.ERROR
+            self._lost_since = None
+            return
         self._begin_postprocess(out)
 
     def _on_postprocess_done(self, ok: bool, out: list[Command]) -> None:
@@ -735,6 +756,8 @@ class SessionMachine:
         self._session = _Session(session_id=sid, app_id=ctx.app_id, pid=ctx.pid)
         out.append(BeginSession(sid, ctx, self._consent_ref, wall))
         out.append(NotifyCountdown(sid, ctx.app_id, self._p.countdown_seconds))
+        # Until CountdownShown this is the deadline for showing it (fail closed); CountdownShown
+        # restarts it so the participants get the full countdown.
         self._countdown_deadline = now + self._p.countdown_seconds
         self._countdown_elapsed = False
         self._countdown_shown = False
@@ -781,6 +804,7 @@ class SessionMachine:
 
     def _begin_stop(self, out: list[Command]) -> None:
         s = self._live()
+        s.ending = True
         out.append(StopSegment(s.session_id, s.segment))
         out.append(Teardown())
         self._state = State.STOPPING

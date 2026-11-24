@@ -311,9 +311,54 @@ def run_qc(record: SessionRecord, cfg: Config) -> list[str]:
             record.add_warning(code)
             if code not in raised:
                 raised.append(code)
+    if not cfg.postprocess.extract_tracks:
+        _qc_streams_in_place(record, cfg, raised)
     if raised:
         log.warning("session %s: QC warnings %s", record.session_id, ",".join(raised))
     return raised
+
+
+def _qc_streams_in_place(record: SessionRecord, cfg: Config, raised: list[str]) -> None:
+    """Track QC is mandatory (§5.5): without extracted role files, analyse the role streams
+    inside the segment's audio file or container. The mix result is stored on that entry,
+    which also marks it as done for a later call (audit 2026-11-24)."""
+    roles = track_roles(cfg)
+    for seg in record.segments:
+        if any(e.role in qc.QC_ROLES for e in seg.files):
+            continue
+        source = next(
+            (
+                e
+                for role in ("audio", "container")
+                for e in seg.files
+                if e.role == role and not e.path.endswith(".age")
+            ),
+            None,
+        )
+        if source is None or source.qc is not None:
+            continue
+        path = record.directory / source.path
+        for idx, role_name in enumerate(roles):
+            if role_name not in qc.QC_ROLES:
+                continue
+            try:
+                result = qc.analyse(path, cfg.qc.silence_dbfs, stream=idx)
+            except ToolError as exc:
+                log.warning(
+                    "session %s %s: QC of %s failed: %s",
+                    record.session_id,
+                    seg.prefix,
+                    role_name,
+                    exc,
+                )
+                record.add_warning(f"qc:failed:{role_name}:{seg.prefix}")
+                continue
+            if role_name == "mix" or source.qc is None:
+                source.qc = result.to_block()
+            for code in qc.qc_warnings(role_name, result, cfg.qc.silence_warn_s):
+                record.add_warning(code)
+                if code not in raised:
+                    raised.append(code)
 
 
 def _encrypt_files(record: SessionRecord, recipients: list[str]) -> None:

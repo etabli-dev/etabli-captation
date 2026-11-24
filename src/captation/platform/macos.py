@@ -198,6 +198,12 @@ def obs_host_pids(
 
 CRASH_KEY_RE = re.compile(r"crash", re.IGNORECASE)  # PF-106
 OBS_INI_FILES = ("user.ini", "global.ini")  # PF-106
+# OBS 33 has no automatic crash upload: after a crash its dialog offers an opt-in checkbox, and
+# an upload leaves this key in global.ini [CrashHandler] (PF-106).
+CRASH_UPLOAD_URL_KEY = "last_crash_log_url"  # PF-106
+CRASH_UPLOAD_CONSENT_LABEL = (  # PF-106: OBS's en-US label of the opt-in checkbox
+    "I have read the privacy policy and consent to the upload."  # PF-106
+)
 
 
 def crash_upload_settings(config_dir: Path) -> dict[str, str]:
@@ -720,7 +726,12 @@ class MacProbe:
         )
 
     def close(self) -> None:
+        """Stop the helper. A later snapshot starts it again and never sees a reading from
+        before the close (the agent closes the probe whenever it is disarmed)."""
         self._stop_proc()
+        with self._lock:
+            self._latest = None
+        self._fresh.clear()
 
 
 # ---- disk encryption -----------------------------------------------------------
@@ -745,6 +756,14 @@ def parse_fdesetup(text: str) -> EncryptionStatus:
     return "unknown"  # not-a-fact: internal status value
 
 
+def mount_point(path: Path) -> Path:
+    """The mount point of the volume holding ``path`` (``path`` itself or its nearest ancestor)."""
+    target = path.absolute()
+    while not os.path.ismount(target) and target != target.parent:
+        target = target.parent
+    return target
+
+
 class MacDiskEncryption:
     """FileVault for the boot data volume (``fdesetup status``), ``diskutil info`` otherwise."""
 
@@ -753,13 +772,17 @@ class MacDiskEncryption:
         runner: Runner = _default_runner,
         data_volume: Path = Path(DATA_VOLUME),
         device_of: Callable[[Path], int] = lambda p: p.stat().st_dev,
+        mount_point_of: Callable[[Path], Path] | None = None,
     ) -> None:
         self._runner = runner
         self._data_volume = data_volume
         self._device_of = device_of
+        self._mount_point_of = mount_point_of or mount_point
 
     def status(self, path: Path) -> EncryptionStatus:
-        target = path
+        # Symlinks are resolved first: an unresolved link would lead the mount-point walk
+        # to "/" (an encrypted system volume) while the data lives elsewhere.
+        target = Path(os.path.realpath(path))
         while not target.exists() and target != target.parent:
             target = target.parent
         try:
@@ -768,7 +791,14 @@ class MacDiskEncryption:
             same = False
         if same:
             return parse_fdesetup(self._runner([FDESETUP, "status"], 10).stdout)  # PF-120
-        out = self._runner([DISKUTIL, "info", "-plist", str(target)], 10)  # PF-121
+        # diskutil takes a mount point or disk, not any folder ("Could not find disk", PF-121)
+        volume = self._mount_point_of(target)
+        try:
+            if self._device_of(volume) != self._device_of(target):
+                return "unknown"  # not-a-fact: the walk left the volume (never guess)
+        except OSError:
+            return "unknown"  # not-a-fact: internal status value
+        out = self._runner([DISKUTIL, "info", "-plist", str(volume)], 10)  # PF-121
         if out.returncode != 0:
             return "unknown"  # not-a-fact: internal status value
         try:
@@ -800,6 +830,10 @@ LD_INTERACTIVE = "Interactive"  # PF-122
 LD_STDOUT = "StandardOutPath"  # PF-122
 LD_STDERR = "StandardErrorPath"  # PF-122
 LD_ENV = "EnvironmentVariables"  # PF-122
+LD_EXIT_TIMEOUT = "ExitTimeOut"  # PF-122: seconds between SIGTERM and SIGKILL (default 20)
+LD_THROTTLE = "ThrottleInterval"  # PF-122: minimum seconds between (re)starts (default 10)
+EXIT_TIMEOUT_S = 60  # stop the recording and finalise the session before launchd kills us
+THROTTLE_S = 60  # a broken install (no OBS, bad config) restarts at most once a minute
 STDOUT_LOG = "launchd.out.log"  # not-a-fact: our own file name
 STDERR_LOG = "launchd.err.log"  # not-a-fact: our own file name
 # launchd starts agents with a minimal PATH; ffmpeg usually comes from Homebrew (PF-122).
@@ -842,6 +876,8 @@ def launch_agent_plist(command: str, log_dir: Path, path_env: str) -> dict[str, 
         LD_PROGRAM_ARGUMENTS: [command, RUN_COMMAND],
         LD_RUN_AT_LOAD: True,
         LD_KEEP_ALIVE: {LD_SUCCESSFUL_EXIT: False},
+        LD_EXIT_TIMEOUT: EXIT_TIMEOUT_S,
+        LD_THROTTLE: THROTTLE_S,
         LD_SESSION_TYPE: LD_AQUA,
         LD_PROCESS_TYPE: LD_INTERACTIVE,
         LD_STDOUT: str(log_dir / STDOUT_LOG),

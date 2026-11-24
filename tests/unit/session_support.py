@@ -20,6 +20,7 @@ from captation.session import (
     MarkSegmentInterrupted,
     Notify,
     NotifyCountdown,
+    ObsBack,
     ObsLost,
     PostprocessDone,
     SegmentStopped,
@@ -176,8 +177,10 @@ class Driver:
         return [c for _, _, cmds, _, _ in self.log for c in cmds]
 
     def drain(self) -> None:
-        """Disarm and let any running stop/post-processing finish (property 3)."""
+        """Disarm and let any running stop/post-processing finish (property 3). An OBS loss
+        always ends in ObsBack (the recovery reset OBS) or ManualStop (it gave up)."""
         self.send(Disarm(), 1.0)
+        self.send(ObsBack(), 1.0)
         self.send(SegmentStopped(), 1.0)
         self.send(PostprocessDone(), 1.0)
 
