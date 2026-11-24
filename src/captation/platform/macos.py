@@ -941,6 +941,14 @@ class MacAutostart:
     def _bootout(self) -> None:
         self._runner([LAUNCHCTL, "bootout", self.service], 30)  # PF-122
 
+    def start_now(self) -> bool:
+        """Start the loaded LaunchAgent now (the app was opened while it was not running, e.g.
+        after macOS's "Quit & Reopen"): the agent stays under launchd, which restarts it after a
+        crash. False if the LaunchAgent is not loaded."""
+        if not self.loaded():
+            return False
+        return self._runner([LAUNCHCTL, "kickstart", self.service], 30).returncode == 0  # PF-122
+
     def install(self, *, systemd: bool = False) -> list[Path]:
         """Write the plist and (re)load it. ``systemd`` has no meaning on macOS."""
         logs = self._log_dir()

@@ -407,3 +407,14 @@ def test_disk_encryption_resolves_symlinks_and_never_guesses(tmp_path: Path) -> 
         mount_point_of=lambda p: Path("/"),
     )
     assert lost.status(link) == "unknown"
+
+
+@pytest.mark.req("R-49")
+def test_start_now_kickstarts_only_a_loaded_launch_agent(tmp_path: Path) -> None:
+    launchd = FakeLaunchd()
+    auto = make_autostart(tmp_path, launchd)
+    assert auto.start_now() is False  # not installed: the opened app starts the agent itself
+    assert not any(c[1] == "kickstart" for c in launchd.calls)
+    auto.install()
+    assert auto.start_now() is True
+    assert launchd.calls[-1] == ["/bin/launchctl", "kickstart", "gui/501/de.etabli.captation"]

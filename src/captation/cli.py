@@ -93,6 +93,14 @@ def open_app() -> None:
         reply = None
     if isinstance(reply, dict) and reply.get("ok"):
         return
+    try:
+        from captation.platform import get_platform
+
+        start_now = getattr(get_platform().autostart(), "start_now", None)
+        if start_now is not None and start_now():
+            return  # launchd starts the agent (and restarts it after a crash)
+    except Exception:  # no autostart on this platform, or launchctl failed: start here
+        pass
     run(None)
 
 

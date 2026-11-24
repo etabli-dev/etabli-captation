@@ -182,5 +182,39 @@ def test_opening_the_app_starts_the_agent_when_none_runs(monkeypatch: pytest.Mon
 
     monkeypatch.setattr(cli.ipc, "request", request)
     monkeypatch.setattr(cli, "run", lambda config=None: started.append(config))
+    from captation import platform as plat
+
+    class NoAutostart:
+        def autostart(self) -> object:
+            return object()  # no start_now: start the agent in this process
+
+    monkeypatch.setattr(plat, "get_platform", lambda: NoAutostart())
     cli.open_app()
     assert started == [None]
+
+
+def test_opening_the_app_hands_the_start_to_launchd(monkeypatch: pytest.MonkeyPatch) -> None:
+    """With the LaunchAgent loaded, the agent is started by launchd, not by the opened app."""
+    from captation import cli
+    from captation import platform as plat
+
+    started: list[object] = []
+    kicked: list[bool] = []
+
+    def request(msg: dict[str, object], timeout_s: float = 5) -> dict[str, object]:
+        raise cli.ipc.AgentNotRunning("no agent")
+
+    class Autostart:
+        def start_now(self) -> bool:
+            kicked.append(True)
+            return True
+
+    class Platform:
+        def autostart(self) -> Autostart:
+            return Autostart()
+
+    monkeypatch.setattr(cli.ipc, "request", request)
+    monkeypatch.setattr(cli, "run", lambda config=None: started.append(config))
+    monkeypatch.setattr(plat, "get_platform", lambda: Platform())
+    cli.open_app()
+    assert kicked == [True] and started == []
