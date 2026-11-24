@@ -80,6 +80,8 @@ STRINGS: dict[str, dict[str, str]] = {
         "notify.obs_lost": "OBS ist abgestürzt oder wurde beendet. Falls OBS nach dem "
         "Neustart nach dem abgesicherten Modus fragt: „Normal ausführen“ wählen.",
         "notify.qc_warning": "Qualitätsprüfung: {warnings}",
+        "notify.running_in_background": "Établi Captation läuft im Hintergrund. Das Symbol oben "
+        "rechts in der Menüleiste zeigt an, ob aufgenommen wird (rot = Aufnahme).",
         "notify.recording_stopped": "OBS hat die Aufnahme selbst beendet (z. B. Speicher voll "
         "oder Encoder-Fehler). Captation versucht, die Aufnahme fortzusetzen.",
         "notify.start_failed": "Die Aufnahme konnte nicht gestartet werden; dieser Anruf wird "
@@ -167,6 +169,8 @@ STRINGS: dict[str, dict[str, str]] = {
         "notify.obs_lost": "OBS crashed or was closed. If OBS asks about Safe Mode after the "
         "restart, choose “Run Normally”.",
         "notify.qc_warning": "Quality check: {warnings}",
+        "notify.running_in_background": "Établi Captation runs in the background. The icon in "
+        "the menu bar shows whether a recording is running (red = recording).",
         "notify.recording_stopped": "OBS stopped the recording on its own (e.g. disk full or "
         "encoder error). Captation tries to continue the recording.",
         "notify.start_failed": "The recording could not be started; this call is not retried. "

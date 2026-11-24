@@ -51,6 +51,11 @@ class UiBackend(Protocol):
 
     def play_sound(self) -> None: ...
 
+    def open_menu(self) -> bool:
+        """Open the tray menu as if it was clicked (the user opened the app); False if the
+        back end cannot, then a notice says where the menu is."""
+        ...
+
     def ask_text(self, title: str, prompt: str) -> str | None: ...
 
     def run_main_loop(
@@ -107,6 +112,9 @@ class UnavailableUi:
 
     def play_sound(self) -> None:
         return None
+
+    def open_menu(self) -> bool:
+        return False
 
     def ask_text(self, title: str, prompt: str) -> str | None:
         return None

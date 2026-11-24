@@ -5,6 +5,10 @@ All notable changes are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+- macOS app: notifications never worked in the bundle because `desktop_notifier.resources` was
+  not packaged; the agent now also asks for the notification permission at start (PF-126).
+
 ### Changed
 - Fail-closed recording control (ADR-019): a countdown must be confirmed as shown before it can
   turn into a recording; unconfirmed stops are retried and never finalised while OBS records;
@@ -17,6 +21,9 @@ All notable changes are documented here. The format follows
 - Unit tests and type checks run on macOS and Windows CI as well (Linux-only modules are skipped).
 
 ### Added
+- Background operation on macOS: opening the app while it runs opens its menu-bar menu (reopen
+  Apple Event, PF-133); without a running agent, opening the app starts it in the background.
+  The LaunchAgent (`install-autostart`) restarts it after a crash (PF-122).
 - Any headset (ADR-020): on macOS the local track records the microphone the call app uses and
   follows a headset that connects or disconnects during the call (`local_input: follow_call`,
   default; PF-132).

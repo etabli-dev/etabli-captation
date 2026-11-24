@@ -61,6 +61,7 @@ class MacUi(PystrayUi):
         self._run_cmd = run
         self._loop_running = threading.Event()
         self._terminate_observer: Any = None
+        self._reopen_handler: Any = None
 
     def play_sound(self) -> None:
         try:
@@ -106,6 +107,23 @@ class MacUi(PystrayUi):
             from PyObjCTools import AppHelper
 
             AppHelper.callAfter(guarded)
+
+    def open_menu(self) -> bool:
+        """The user opened the app (Finder, Spotlight, Launchpad): open the menu-bar menu, as a
+        click on the item would. Runs on the main thread."""
+        item = getattr(self._icon, "_status_item", None)  # not-a-fact: pystray darwin internals
+        if item is None or not self._loop_running.is_set():
+            return False
+
+        def click() -> None:
+            button = item.button()
+            if button is None:
+                log.warning("ui: menu-bar button missing, menu not opened")
+                return
+            button.performClick_(None)
+
+        self._ui(click)
+        return True
 
     def _icon_visible(self) -> bool:
         """The menu-bar item really exists and is shown (not only the pystray object): the
@@ -173,11 +191,50 @@ class MacUi(PystrayUi):
                 NSApplicationWillTerminateNotification, None, None, will_terminate
             )
             self._loop_running.set()
+            try:
+                self._reopen_handler = install_reopen_handler(self.open_menu)
+            except Exception as exc:
+                log.warning(
+                    "ui: reopen handler unavailable (%s: %s)", type(exc).__name__, str(exc)[:200]
+                )
 
         AppHelper.callAfter(install)
 
 
 VISIBILITY_TIMEOUT_S = 2.0
+# Opening an app that already runs (Finder, Spotlight, Launchpad, `open -a`) sends it the
+# "reopen" Apple Event instead of starting a second process (PF-133).
+AE_CORE_EVENT_CLASS = 0x61657674  # PF-133: 'aevt' (kCoreEventClass)
+AE_REOPEN_APPLICATION = 0x72617070  # PF-133: 'rapp' (kAEReopenApplication)
+REOPEN_SELECTOR = "handleReopen:withReplyEvent:"  # not-a-fact: our own Objective-C selector
+_REOPEN_CLASS: Any = None
+
+
+def install_reopen_handler(on_reopen: Callable[[], object]) -> Any:
+    """Register ``on_reopen`` for the reopen Apple Event; returns the handler (keep it
+    referenced). Main thread, after NSApplication exists."""
+    global _REOPEN_CLASS
+    import objc
+    from Foundation import NSAppleEventManager, NSObject
+
+    if _REOPEN_CLASS is None:
+
+        class CaptationReopenHandler(NSObject):  # type: ignore[misc]
+            callback: Callable[[], object] | None = None
+
+            @objc.typedSelector(b"v@:@@")  # type: ignore[untyped-decorator]
+            def handleReopen_withReplyEvent_(self, event: Any, reply: Any) -> None:
+                log.info("ui: the app was opened again: showing the menu")
+                if self.callback is not None:
+                    self.callback()
+
+        _REOPEN_CLASS = CaptationReopenHandler
+    handler = _REOPEN_CLASS.alloc().init()
+    handler.callback = on_reopen
+    NSAppleEventManager.sharedAppleEventManager().setEventHandler_andSelector_forEventClass_andEventID_(
+        handler, REOPEN_SELECTOR, AE_CORE_EVENT_CLASS, AE_REOPEN_APPLICATION
+    )
+    return handler
 
 
 def _on_main_thread() -> bool:

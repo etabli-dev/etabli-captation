@@ -10,6 +10,7 @@ countdown in addition. Without a tray, arming is refused by the agent (not here)
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import threading
 from collections.abc import Callable
@@ -181,6 +182,14 @@ class ConsentUi:
             log.warning("reminder: notification unavailable, tray state and sound instead")
         if self.sound_on_start or not shown:
             self.backend.play_sound()  # `sound_on_start: false` never silences the fallback
+
+    def show(self) -> None:
+        """The user opened the app: show the menu, or say where it is."""
+        opened = False
+        with contextlib.suppress(Exception):
+            opened = self.backend.open_menu()
+        if not opened:
+            self.notice("app.title", "notify.running_in_background")
 
     def notice(self, title_key: str, body_key: str, **values: object) -> None:
         if self.backend.notify(self.t(title_key), self.t(body_key, **values)) is None:

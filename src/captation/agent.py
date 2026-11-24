@@ -768,6 +768,9 @@ class Agent:
         kind = msg["type"]
         if kind == "arm":
             return self.arm(msg.get("consent_ref"))
+        if kind == "show":
+            self.d.ui.show()
+            return {"ok": True, "state": self.machine.state.name}
         if kind == "status":
             st: dict[str, Any] = self.submit(_Query(self.machine.status))
             st["tray"] = self.d.ui.tray_available()

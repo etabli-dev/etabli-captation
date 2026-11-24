@@ -26,6 +26,7 @@ NOTICES = os.path.join(
 datas = (
     collect_data_files("captation")
     + collect_data_files("jsonschema_specifications")
+    + collect_data_files("desktop_notifier")
     + copy_metadata("keyring")
     # Licence, disclaimer and third-party notices end up in Contents/Resources.
     + [
@@ -38,6 +39,9 @@ hiddenimports = (
     collect_submodules("keyring.backends")
     + collect_submodules("desktop_notifier.backends")
     + [
+        # Loaded by name (importlib.resources.files) for the default icon: without it the
+        # notifier fails to start and only the fallback chain is left (audit 2026-11-24).
+        "desktop_notifier.resources",
         "captation.platform.macos",
         "captation.ui.macos",
         "captation.ui.pystray_ui",

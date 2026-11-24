@@ -148,3 +148,39 @@ def test_socket_path_falls_back_when_too_long(tmp_path: Path) -> None:
     got = socket_path(long_dir / "agent.sock", tmp_path / "tmp", 501)
     assert got == tmp_path / "tmp" / "etabli-captation-501" / "agent.sock"
     assert (got.parent.stat().st_mode & 0o777) == 0o700
+
+
+def test_show_is_an_allowed_message() -> None:
+    from captation.ipc import MESSAGE_TYPES
+
+    assert "show" in MESSAGE_TYPES
+
+
+def test_opening_the_app_shows_the_running_agent(monkeypatch: pytest.MonkeyPatch) -> None:
+    from captation import cli
+
+    sent: list[dict[str, object]] = []
+    started: list[object] = []
+
+    def request(msg: dict[str, object], timeout_s: float = 5) -> dict[str, object]:
+        sent.append(msg)
+        return {"ok": True, "state": "DISARMED"}
+
+    monkeypatch.setattr(cli.ipc, "request", request)
+    monkeypatch.setattr(cli, "run", lambda config=None: started.append(config))
+    cli.open_app()
+    assert sent == [{"type": "show"}] and started == []
+
+
+def test_opening_the_app_starts_the_agent_when_none_runs(monkeypatch: pytest.MonkeyPatch) -> None:
+    from captation import cli
+
+    started: list[object] = []
+
+    def request(msg: dict[str, object], timeout_s: float = 5) -> dict[str, object]:
+        raise cli.ipc.AgentNotRunning("no agent")
+
+    monkeypatch.setattr(cli.ipc, "request", request)
+    monkeypatch.setattr(cli, "run", lambda config=None: started.append(config))
+    cli.open_app()
+    assert started == [None]

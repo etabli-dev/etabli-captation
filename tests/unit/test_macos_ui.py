@@ -139,3 +139,20 @@ def test_signals_stop_the_cocoa_run_loop_cleanly(signame: str) -> None:
         assert proc.returncode == 0
     finally:
         proc.kill()
+
+
+@pytest.mark.macos
+@pytest.mark.req("R-49")
+def test_reopen_event_opens_the_menu() -> None:
+    """Opening the running app sends the reopen Apple Event (PF-133): it opens the menu."""
+    opened: list[bool] = []
+    handler = mac_ui.install_reopen_handler(lambda: opened.append(True))
+    handler.handleReopen_withReplyEvent_(None, None)
+    assert opened == [True]
+    assert (mac_ui.AE_CORE_EVENT_CLASS, mac_ui.AE_REOPEN_APPLICATION) == (0x61657674, 0x72617070)
+    assert mac_ui.AE_CORE_EVENT_CLASS.to_bytes(4, "big") == b"aevt"
+
+
+def test_open_menu_without_a_running_menu_bar_item() -> None:
+    ui = MacUi()
+    assert ui.open_menu() is False  # no icon yet: the agent then shows a notice instead

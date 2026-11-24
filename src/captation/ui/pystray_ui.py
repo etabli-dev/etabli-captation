@@ -68,6 +68,7 @@ class PystrayUi:
         self._loop = asyncio.new_event_loop()
         self._loop_thread = threading.Thread(target=self._loop.run_forever, daemon=True)
         self._notifier: Any = None
+        self._auth_request: Any = None  # pending permission request (kept referenced)
         self._capabilities: set[str] = set()
         self._authorised = False
         self._authorised_at = 0.0
@@ -115,8 +116,11 @@ class PystrayUi:
         self._loop_thread.start()
         try:
             self._run(self._setup_notifier())
-        except Exception:
-            log.warning("notify: desktop-notifier unavailable")
+        except Exception as exc:
+            # Type and message only: OS/library errors here carry no personal data.
+            log.warning(
+                "notify: desktop-notifier unavailable (%s: %s)", type(exc).__name__, str(exc)[:200]
+            )
 
     async def _setup_notifier(self) -> None:
         from desktop_notifier import DesktopNotifier
@@ -125,6 +129,16 @@ class PystrayUi:
         caps = await self._notifier.get_capabilities()
         names = {str(getattr(c, "name", c)).lower() for c in caps}
         self._capabilities = {"body"} | ({"actions"} if "buttons" in names else set())
+        # Ask for the permission now (the OS shows its prompt once), not at the first countdown:
+        # an unanswered prompt would turn that countdown into the fallback (§2.8). Not awaited.
+        self._auth_request = asyncio.ensure_future(self._request_authorisation())
+
+    async def _request_authorisation(self) -> None:
+        try:
+            if self._notifier is not None:
+                await self._notifier.request_authorisation()
+        except Exception:
+            log.warning("notify: permission request failed")
 
     def tray_available(self) -> bool:
         return self._tray_ok and self._icon is not None and self._icon_visible()
@@ -292,6 +306,10 @@ class PystrayUi:
     ) -> None:
         """Hook for platform back ends once the tray run loop runs (macOS: signals)."""
         return None
+
+    def open_menu(self) -> bool:
+        """Generic pystray cannot open its menu programmatically (macOS overrides this)."""
+        return False
 
     def stop(self) -> None:
         if self._icon is not None:

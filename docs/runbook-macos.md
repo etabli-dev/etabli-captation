@@ -284,6 +284,10 @@ codesign --verify --strict --verbose=2 "/Applications/Établi Captation.app"
 "$APP" status
 ```
 
+Opening the app again while it runs (Finder, Spotlight, `open -a`) opens the menu-bar menu
+(PF-133); without a running agent, opening the app starts it in the background. After
+`kill -KILL` of the agent, launchd starts it again (`launchctl print … | grep runs`).
+
 Check the menu-bar icon (grey → yellow when armed → red while recording), the countdown
 notification with *Abbrechen*, and the start reminder. With a Developer ID certificate, set
 `MACOS_SIGN_IDENTITY` (and notary credentials) and rebuild; verify the notarised build starts

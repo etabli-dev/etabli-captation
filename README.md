@@ -148,6 +148,12 @@ uv run python tools/check_facts.py && uv run python tools/licence_gate.py
 Weitere Befehle: `captation status`, `captation stop` (Aufnahme beenden, bereit bleiben),
 `captation cancel` (Countdown abbrechen).
 
+**Im Hintergrund:** Captation hat kein Fenster und (macOS) kein Dock-Symbol. Mit
+`captation install-autostart` startet es bei jeder Anmeldung, immer mit beendetem Studienmodus,
+und nach einem Absturz von selbst neu. Sichtbar ist nur das Symbol in der Menüleiste: grau = aus,
+gelb = Studienmodus, rot = Aufnahme. Wer die App erneut öffnet (Finder, Spotlight, Launchpad),
+bekommt das Menü des Symbols.
+
 ### 3. Mobile Aufnahmen importieren
 
 ```

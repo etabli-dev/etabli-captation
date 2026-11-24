@@ -34,7 +34,7 @@ MAX_CONNECTIONS = 16  # concurrent clients; more are closed at once (only this u
 READ_DEADLINE_S = 5.0  # a client that stalls mid-message is cut off
 AUTH_TIMEOUT_S = 2.0
 NONCE_BYTES = 32
-MESSAGE_TYPES = frozenset({"arm", "disarm", "status", "stop", "cancel"})
+MESSAGE_TYPES = frozenset({"arm", "disarm", "status", "stop", "cancel", "show"})
 Handler = Callable[[dict[str, Any]], dict[str, Any]]
 
 

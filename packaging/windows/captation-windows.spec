@@ -21,6 +21,7 @@ hiddenimports = [
     # pystray and desktop-notifier pick their back ends at runtime
     "pystray._win32",
     "desktop_notifier.backends.winrt",
+    "desktop_notifier.resources",  # loaded by name (importlib.resources.files)
     *collect_submodules("keyring.backends"),
     *collect_submodules("winrt"),
 ]

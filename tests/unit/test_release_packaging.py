@@ -94,3 +94,12 @@ def test_specs_are_valid_python() -> None:
         compile(spec.read_text(encoding="utf-8"), str(spec), "exec")
     kw: dict[str, Any] = analysis_keywords("macos/captation.spec")
     assert "hiddenimports" in kw and "datas" in kw
+
+
+@pytest.mark.parametrize("spec", ["macos/captation.spec", "windows/captation-windows.spec"])
+def test_notifier_resources_are_bundled(spec: str) -> None:
+    """desktop-notifier loads ``desktop_notifier.resources`` by name: PyInstaller cannot see it,
+    and without it the notifier never starts in the bundle (found live, 2026-11-24)."""
+    lines = code_lines(spec)
+    assert any('"desktop_notifier.resources"' in line for line in lines)
+    assert any('collect_data_files("desktop_notifier")' in line for line in lines)

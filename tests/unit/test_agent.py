@@ -38,6 +38,8 @@ class FakeBackend:
         self.blink = False
         self.sounds = 0
         self.ask_answer: str | None = "P-017"
+        self.menu_opens = 0
+        self.can_open_menu = True
 
     def start(self, on_tray_change: Callable[[bool], None] | None = None) -> None:
         self.on_tray_change = on_tray_change
@@ -66,6 +68,11 @@ class FakeBackend:
 
     def play_sound(self) -> None:
         self.sounds += 1
+
+    def open_menu(self) -> bool:
+        if self.can_open_menu:
+            self.menu_opens += 1
+        return self.can_open_menu
 
     def ask_text(self, title: str, prompt: str) -> str | None:
         return self.ask_answer
@@ -508,3 +515,13 @@ def test_local_track_follows_the_headset_during_the_call(
     assert rig.fake_obs.inputs["Captation Local"]["settings"]["device_id"] == "default"
     assert rig.state is State.RECORDING and rig.fake_obs.names().count("StartRecord") == 1
     assert "alsa_input.headset" not in caplog.text  # device UIDs are never logged
+
+
+@pytest.mark.req("R-49")
+def test_opening_the_app_opens_the_menu_bar_menu(rig: Rig) -> None:
+    """The agent runs in the background; opening the app again shows its menu."""
+    reply = rig.agent.handle_ipc({"type": "show"})
+    assert reply["ok"] is True and rig.backend.menu_opens == 1
+    rig.backend.can_open_menu = False  # back ends without it: a notice says where the icon is
+    rig.agent.handle_ipc({"type": "show"})
+    assert "Menüleiste" in rig.backend.notes[-1]["body"]

@@ -84,6 +84,18 @@ def run(config: ConfigOpt = None) -> None:
         fail(str(exc))
 
 
+def open_app() -> None:
+    """The app was opened without arguments (Finder, Spotlight, Launchpad): the running agent
+    opens its menu-bar menu; if none runs, the agent starts here, in the background."""
+    try:
+        reply = ipc.request({"type": "show"}, timeout_s=5)
+    except ipc.IpcError:
+        reply = None
+    if isinstance(reply, dict) and reply.get("ok"):
+        return
+    run(None)
+
+
 @app.command()
 def arm(
     ref: Annotated[str | None, typer.Option("--ref", help="Consent reference")] = None,
