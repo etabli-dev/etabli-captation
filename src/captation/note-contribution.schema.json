@@ -1,0 +1,299 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/etabli-dev/etabli-sillage/notes-contribution.schema.json",
+  "title": "Notes contribution version 1",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "schema": {
+      "const": "notes-contribution/1"
+    },
+    "note_id": {
+      "type": "string",
+      "format": "uuid",
+      "pattern": "^[a-f0-9-]{36}$"
+    },
+    "event": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "calendar_id",
+        "event_uid",
+        "occurrence_start"
+      ],
+      "properties": {
+        "calendar_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 500
+        },
+        "event_uid": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 500
+        },
+        "occurrence_start": {
+          "type": "string",
+          "format": "date-time"
+        }
+      }
+    },
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "item_id",
+        "revision"
+      ],
+      "properties": {
+        "name": {
+          "enum": [
+            "Plaud",
+            "Greffe",
+            "Captation",
+            "Courrier",
+            "Supernote"
+          ]
+        },
+        "item_id": {
+          "type": "string",
+          "pattern": "^[a-zA-Z0-9_-]{1,128}$"
+        },
+        "revision": {
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    },
+    "occurred_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "title": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 300
+    },
+    "participants": {
+      "type": "array",
+      "maxItems": 100,
+      "items": {
+        "type": "string",
+        "maxLength": 200
+      }
+    },
+    "project": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "maxLength": 200
+    },
+    "content": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "summary",
+        "decisions",
+        "tasks",
+        "open_questions"
+      ],
+      "properties": {
+        "summary": {
+          "type": "string",
+          "maxLength": 12000
+        },
+        "decisions": {
+          "type": "array",
+          "maxItems": 200,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "text",
+              "evidence"
+            ],
+            "properties": {
+              "text": {
+                "type": "string",
+                "maxLength": 1000
+              },
+              "evidence": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 1000
+              }
+            }
+          }
+        },
+        "tasks": {
+          "type": "array",
+          "maxItems": 200,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "text",
+              "owner",
+              "due",
+              "evidence"
+            ],
+            "properties": {
+              "text": {
+                "type": "string",
+                "maxLength": 1000
+              },
+              "owner": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "maxLength": 200
+              },
+              "due": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "maxLength": 100
+              },
+              "evidence": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 1000
+              }
+            }
+          }
+        },
+        "open_questions": {
+          "type": "array",
+          "maxItems": 200,
+          "items": {
+            "type": "string",
+            "maxLength": 1000
+          }
+        }
+      }
+    },
+    "processing": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "engine",
+        "incomplete"
+      ],
+      "properties": {
+        "engine": {
+          "type": "string",
+          "maxLength": 100
+        },
+        "model": {
+          "type": "string",
+          "maxLength": 200
+        },
+        "chunks": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100
+        },
+        "incomplete": {
+          "type": "boolean"
+        },
+        "warning": {
+          "type": "string",
+          "maxLength": 500
+        },
+        "application": {
+          "type": "string",
+          "maxLength": 100
+        },
+        "transcription": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "engine"
+          ],
+          "properties": {
+            "engine": {
+              "type": "string",
+              "maxLength": 100
+            },
+            "model_sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            }
+          }
+        },
+        "model_digest": {
+          "type": "string",
+          "maxLength": 100
+        }
+      }
+    },
+    "review": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "status"
+      ],
+      "properties": {
+        "status": {
+          "enum": [
+            "unreviewed",
+            "reviewed"
+          ]
+        }
+      }
+    },
+    "content_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    }
+  },
+  "required": [
+    "schema",
+    "note_id",
+    "event",
+    "source",
+    "occurred_at",
+    "created_at",
+    "title",
+    "participants",
+    "project",
+    "content",
+    "processing",
+    "review",
+    "content_sha256"
+  ],
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "review": {
+            "properties": {
+              "status": {
+                "const": "reviewed"
+              }
+            }
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "processing": {
+            "properties": {
+              "incomplete": {
+                "const": false
+              }
+            }
+          }
+        }
+      }
+    }
+  ]
+}

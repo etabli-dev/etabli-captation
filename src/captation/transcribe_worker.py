@@ -222,6 +222,11 @@ class TranscriptionWorker:
                     item, self.cfg, runner=self._run_tool, now=self._now, should_pause=self._pause
                 )
                 self.processed.append(result)
+                # This callback runs only after the transcript and summary have been committed.
+                # The legacy session-complete hook remains a recording-finalization hook.
+                from captation.notes_export import export
+
+                export(item)
             except _Stopped:
                 break
             except Exception:

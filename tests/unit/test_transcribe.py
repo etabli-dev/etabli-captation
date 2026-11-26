@@ -445,7 +445,9 @@ def test_odd_model_output_is_ignored(tmp_path: Path) -> None:
 def test_media_is_deleted_after_90_days_only_with_a_complete_transcript(tmp_path: Path) -> None:
     cfg = make_cfg(tmp_path)
     session = make_session(cfg)
-    old = datetime(2026, 11, 24, 14, tzinfo=datetime.now().astimezone().tzinfo) + timedelta(days=91)
+    old = datetime.fromtimestamp(
+        (session / "session.json").stat().st_mtime
+    ).astimezone() + timedelta(days=91)
     assert storage.apply_media_retention(cfg, old) == []  # no transcript yet: nothing deleted
     run(session, cfg, FakeTools())
     assert storage.apply_media_retention(cfg, old - timedelta(days=2)) == []  # 89 days: kept

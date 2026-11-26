@@ -205,3 +205,22 @@ Source available, **not open source**: all rights reserved, and any use requires
 approval of the copyright holder ([LICENSE](LICENSE)). Approved use is subject to
 [DISCLAIMER.md](DISCLAIMER.md), which every user accepts with a checkbox before the first use.
 Third-party components keep their own licences ([docs/licensing.md](docs/licensing.md)).
+
+### Shared Notes contributions
+
+After transcription and local summarization complete, a session with a
+`notes-target.json` identity emits an **unreviewed**, text-only contribution in
+`processed/notes-outbox/`. Obtain the identity from the Notes manifest service;
+never infer it from a nearby appointment. The legacy recording-complete hook still
+runs before transcription and must not be used to upload transcripts to Notes.
+
+Review the summary and event, then run:
+
+```sh
+python -m captation.notes_export /path/to/session --target /path/to/event.json --reviewed
+```
+
+Upload only the immutable JSON envelopes to `App/Notes/Captation/`; check the
+matching files under `receipts/` for import/calendar status. Original media and full
+transcripts stay in the source workspace. Incomplete or missing summaries are not
+exported, and no task is executed by this exporter.
